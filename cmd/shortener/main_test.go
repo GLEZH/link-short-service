@@ -1,60 +1,80 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestRouter(t *testing.T) {
-	tests := []struct {
-		name           string
-		method         string
-		path           string
-		wantStatusCode int
-	}{
-		{
-			name:           "post root works",
-			method:         http.MethodPost,
-			path:           "/",
-			wantStatusCode: http.StatusCreated,
-		},
-		{
-			name:           "get id works",
-			method:         http.MethodGet,
-			path:           "/abc123",
-			wantStatusCode: http.StatusTemporaryRedirect,
-		},
-		{
-			name:           "get root is bad request",
-			method:         http.MethodGet,
-			path:           "/",
-			wantStatusCode: http.StatusBadRequest,
-		},
-		{
-			name:           "post wrong path is bad request",
-			method:         http.MethodPost,
-			path:           "/test",
-			wantStatusCode: http.StatusBadRequest,
-		},
-		{
-			name:           "post id is bad request",
-			method:         http.MethodPost,
-			path:           "/abc123",
-			wantStatusCode: http.StatusBadRequest,
-		},
-	}
+	t.Run("shorten and expand", func(t *testing.T) {
+		router := newRouter(nil)
+		originalURL := "http://example.com"
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(test.method, test.path, nil)
-			recorder := httptest.NewRecorder()
+		shortenRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		shortenRecorder := httptest.NewRecorder()
+		router.ServeHTTP(shortenRecorder, shortenRequest)
 
-			newRouter(nil).ServeHTTP(recorder, request)
+		if shortenRecorder.Code != http.StatusCreated {
+			t.Fatalf("shorten status code = %d, want %d", shortenRecorder.Code, http.StatusCreated)
+		}
 
-			if recorder.Code != test.wantStatusCode {
-				t.Errorf("status code = %d, want %d", recorder.Code, test.wantStatusCode)
-			}
-		})
-	}
+		body, err := io.ReadAll(shortenRecorder.Result().Body)
+		if err != nil {
+			t.Fatalf("io.ReadAll() error = %v", err)
+		}
+
+		shortURL := string(body)
+		if shortURL == "" {
+			t.Fatal("short url is empty")
+		}
+
+		expandPath := strings.TrimPrefix(shortURL, "http://localhost:8080")
+		expandRequest := httptest.NewRequest(http.MethodGet, expandPath, nil)
+		expandRecorder := httptest.NewRecorder()
+		router.ServeHTTP(expandRecorder, expandRequest)
+
+		if expandRecorder.Code != http.StatusTemporaryRedirect {
+			t.Errorf("expand status code = %d, want %d", expandRecorder.Code, http.StatusTemporaryRedirect)
+		}
+
+		if location := expandRecorder.Header().Get("Location"); location != originalURL {
+			t.Errorf("Location = %q, want %q", location, originalURL)
+		}
+	})
+
+	t.Run("get root is bad request", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		recorder := httptest.NewRecorder()
+
+		newRouter(nil).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("post wrong path is bad request", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/test", nil)
+		recorder := httptest.NewRecorder()
+
+		newRouter(nil).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("post id is bad request", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/abc123", nil)
+		recorder := httptest.NewRecorder()
+
+		newRouter(nil).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
 }
