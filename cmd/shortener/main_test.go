@@ -50,7 +50,7 @@ func TestRouter(t *testing.T) {
 			request := httptest.NewRequest(test.method, test.path, nil)
 			recorder := httptest.NewRecorder()
 
-			newRouter().ServeHTTP(recorder, request)
+			newRouter(nil).ServeHTTP(recorder, request)
 
 			if recorder.Code != test.wantStatusCode {
 				t.Errorf("status code = %d, want %d", recorder.Code, test.wantStatusCode)
