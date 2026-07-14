@@ -9,13 +9,18 @@ import (
 
 	"github.com/GLEZH/linkshrtservice/internal/handler"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
+	"go.uber.org/zap"
 )
+
+func newTestRouter() http.Handler {
+	storage := repository.NewURLStorage()
+	handlers := handler.New("http://localhost:8080", storage)
+	return newRouter(handlers, zap.NewNop().Sugar())
+}
 
 func TestRouter(t *testing.T) {
 	t.Run("shorten and expand", func(t *testing.T) {
-		storage := repository.NewURLStorage()
-		handlers := handler.New("http://localhost:8080", storage)
-		router := newRouter(handlers)
+		router := newTestRouter()
 		originalURL := "http://example.com"
 
 		shortenRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
@@ -51,12 +56,10 @@ func TestRouter(t *testing.T) {
 	})
 
 	t.Run("get root is bad request", func(t *testing.T) {
-		storage := repository.NewURLStorage()
-		handlers := handler.New("http://localhost:8080", storage)
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		recorder := httptest.NewRecorder()
 
-		newRouter(handlers).ServeHTTP(recorder, request)
+		newTestRouter().ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -64,12 +67,10 @@ func TestRouter(t *testing.T) {
 	})
 
 	t.Run("post wrong path is bad request", func(t *testing.T) {
-		storage := repository.NewURLStorage()
-		handlers := handler.New("http://localhost:8080", storage)
 		request := httptest.NewRequest(http.MethodPost, "/test", nil)
 		recorder := httptest.NewRecorder()
 
-		newRouter(handlers).ServeHTTP(recorder, request)
+		newTestRouter().ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -77,12 +78,10 @@ func TestRouter(t *testing.T) {
 	})
 
 	t.Run("post id is bad request", func(t *testing.T) {
-		storage := repository.NewURLStorage()
-		handlers := handler.New("http://localhost:8080", storage)
 		request := httptest.NewRequest(http.MethodPost, "/abc123", nil)
 		recorder := httptest.NewRecorder()
 
-		newRouter(handlers).ServeHTTP(recorder, request)
+		newTestRouter().ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)

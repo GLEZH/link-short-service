@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 type URLStorage interface {
 	Save(url entity.URL) (entity.URL, error)
-	Get(id string) (entity.URL, bool)
+	Get(id string) (entity.URL, error)
 }
 
 type Handler struct {
@@ -35,13 +36,13 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 
 	originalURL := strings.TrimSpace(string(body))
 	if originalURL == "" {
-		w.WriteHeader(http.StatusBadRequest)
+		writeError(w, entity.ErrInvalidURL)
 		return
 	}
 
 	shortURL, err := h.storage.Save(entity.URL{OriginalURL: originalURL})
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		writeError(w, err)
 		return
 	}
 
@@ -57,12 +58,23 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, ok := h.storage.Get(id)
-	if !ok {
-		w.WriteHeader(http.StatusBadRequest)
+	shortURL, err := h.storage.Get(id)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
 	w.Header().Set("Location", shortURL.OriginalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func writeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, entity.ErrInvalidURL):
+		w.WriteHeader(http.StatusBadRequest)
+	case errors.Is(err, entity.ErrURLNotFound):
+		w.WriteHeader(http.StatusBadRequest)
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+	}
 }

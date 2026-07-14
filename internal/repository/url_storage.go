@@ -31,10 +31,14 @@ func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
 	return url, nil
 }
 
-func (s *URLStorage) Get(id string) (entity.URL, bool) {
+func (s *URLStorage) Get(id string) (entity.URL, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	url, ok := s.urls[id]
-	return url, ok
+	if !ok {
+		return entity.URL{}, entity.ErrURLNotFound
+	}
+
+	return url, nil
 }

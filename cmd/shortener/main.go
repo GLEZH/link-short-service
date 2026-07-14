@@ -6,8 +6,10 @@ import (
 
 	"github.com/GLEZH/linkshrtservice/internal/config"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
+	"github.com/GLEZH/linkshrtservice/internal/logger"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -19,13 +21,22 @@ func main() {
 	storage := repository.NewURLStorage()
 	handlers := handler.New(cfg.BaseURL, storage)
 
-	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers))
+	zapLogger, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+	defer zapLogger.Sync()
+
+	sugar := zapLogger.Sugar()
+	sugar.Infow("starting server", "addr", cfg.ServerAddress)
+
+	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar))
 	if err != nil {
 		panic(err)
 	}
 }
 
-func newRouter(handlers *handler.Handler) http.Handler {
+func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler {
 	router := chi.NewRouter()
 
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -39,5 +50,5 @@ func newRouter(handlers *handler.Handler) http.Handler {
 	router.Post("/", handlers.ShortenURL)
 	router.Get("/{id}", handlers.GetURL)
 
-	return router
+	return logger.WithLogging(router, sugar)
 }
