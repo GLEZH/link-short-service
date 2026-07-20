@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -99,6 +101,85 @@ func TestRouter(t *testing.T) {
 		}
 	})
 
+	t.Run("json shorten returns gzip response", func(t *testing.T) {
+		router := newTestRouter()
+		originalURL := "https://practicum.yandex.ru"
+
+		request := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"`+originalURL+`"}`))
+		request.Header.Set("Accept-Encoding", "gzip")
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusCreated)
+		}
+
+		if encoding := recorder.Header().Get("Content-Encoding"); encoding != "gzip" {
+			t.Fatalf("Content-Encoding = %q, want %q", encoding, "gzip")
+		}
+
+		gz, err := gzip.NewReader(recorder.Result().Body)
+		if err != nil {
+			t.Fatalf("gzip.NewReader() error = %v", err)
+		}
+		defer gz.Close()
+
+		var response struct {
+			Result string `json:"result"`
+		}
+		if err = json.NewDecoder(gz).Decode(&response); err != nil {
+			t.Fatalf("json decode error = %v", err)
+		}
+
+		if response.Result == "" {
+			t.Fatal("result is empty")
+		}
+	})
+
+	t.Run("json shorten accepts gzip request", func(t *testing.T) {
+		router := newTestRouter()
+		originalURL := "https://practicum.yandex.ru"
+		body := gzipBody(t, `{"url":"`+originalURL+`"}`)
+
+		request := httptest.NewRequest(http.MethodPost, "/api/shorten", body)
+		request.Header.Set("Content-Encoding", "gzip")
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusCreated)
+		}
+
+		var response struct {
+			Result string `json:"result"`
+		}
+		if err := json.NewDecoder(recorder.Result().Body).Decode(&response); err != nil {
+			t.Fatalf("json decode error = %v", err)
+		}
+
+		if response.Result == "" {
+			t.Fatal("result is empty")
+		}
+	})
+
+	t.Run("text plain response is not compressed", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://example.com"))
+		request.Header.Set("Accept-Encoding", "gzip")
+		recorder := httptest.NewRecorder()
+
+		newTestRouter().ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusCreated)
+		}
+
+		if encoding := recorder.Header().Get("Content-Encoding"); encoding != "" {
+			t.Errorf("Content-Encoding = %q, want empty", encoding)
+		}
+	})
+
 	t.Run("json shorten with bad json is bad request", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{`))
 		request.Header.Set("Content-Type", "application/json")
@@ -143,4 +224,19 @@ func TestRouter(t *testing.T) {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
 		}
 	})
+}
+
+func gzipBody(t *testing.T, body string) *bytes.Buffer {
+	t.Helper()
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write([]byte(body)); err != nil {
+		t.Fatalf("gzip write error = %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gzip close error = %v", err)
+	}
+
+	return &buf
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/GLEZH/linkshrtservice/internal/config"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
 	"github.com/GLEZH/linkshrtservice/internal/logger"
+	"github.com/GLEZH/linkshrtservice/internal/middleware"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -51,5 +52,5 @@ func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler
 	router.Post("/api/shorten", handlers.ShortenURLJSON)
 	router.Get("/{id}", handlers.GetURL)
 
-	return logger.WithLogging(router, sugar)
+	return logger.WithLogging(middleware.WithGzip(router), sugar)
 }
