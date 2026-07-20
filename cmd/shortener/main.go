@@ -48,6 +48,7 @@ func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler
 	})
 
 	router.Post("/", handlers.ShortenURL)
+	router.Post("/api/shorten", handlers.ShortenURLJSON)
 	router.Get("/{id}", handlers.GetURL)
 
 	return logger.WithLogging(router, sugar)

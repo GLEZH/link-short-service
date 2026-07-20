@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -20,6 +21,14 @@ type Handler struct {
 	storage URLStorage
 }
 
+type shortenRequest struct {
+	URL string `json:"url"`
+}
+
+type shortenResponse struct {
+	Result string `json:"result"`
+}
+
 func New(baseURL string, storage URLStorage) *Handler {
 	return &Handler{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -34,13 +43,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originalURL := strings.TrimSpace(string(body))
-	if originalURL == "" {
-		writeError(w, entity.ErrInvalidURL)
-		return
-	}
-
-	shortURL, err := h.storage.Save(entity.URL{OriginalURL: originalURL})
+	shortURL, err := h.createShortURL(string(body))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -48,7 +51,25 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write([]byte(h.baseURL + "/" + shortURL.ID))
+	_, _ = w.Write([]byte(shortURL))
+}
+
+func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
+	var request shortenRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	shortURL, err := h.createShortURL(request.URL)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
 }
 
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +87,20 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", shortURL.OriginalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) createShortURL(originalURL string) (string, error) {
+	originalURL = strings.TrimSpace(originalURL)
+	if originalURL == "" {
+		return "", entity.ErrInvalidURL
+	}
+
+	shortURL, err := h.storage.Save(entity.URL{OriginalURL: originalURL})
+	if err != nil {
+		return "", err
+	}
+
+	return h.baseURL + "/" + shortURL.ID, nil
 }
 
 func writeError(w http.ResponseWriter, err error) {
