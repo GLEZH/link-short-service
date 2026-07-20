@@ -19,7 +19,12 @@ func main() {
 		panic(err)
 	}
 
-	storage := repository.NewURLStorage()
+	storage, err := repository.New(cfg.FileStoragePath)
+	if err != nil {
+		panic(err)
+	}
+	defer storage.Close()
+
 	handlers := handler.New(cfg.BaseURL, storage)
 
 	zapLogger, err := zap.NewDevelopment()
@@ -29,7 +34,7 @@ func main() {
 	defer zapLogger.Sync()
 
 	sugar := zapLogger.Sugar()
-	sugar.Infow("starting server", "addr", cfg.ServerAddress)
+	sugar.Infow("starting server", "addr", cfg.ServerAddress, "file_storage_path", cfg.FileStoragePath)
 
 	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar))
 	if err != nil {

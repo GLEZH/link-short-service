@@ -7,53 +7,63 @@ import (
 
 func TestNew(t *testing.T) {
 	tests := []struct {
-		name        string
-		args        []string
-		envAddress  string
-		envBaseURL  string
-		useAddress  bool
-		useBaseURL  bool
-		wantAddress string
-		wantBaseURL string
-		wantErr     bool
+		name            string
+		args            []string
+		envAddress      string
+		envBaseURL      string
+		envFilePath     string
+		useAddress      bool
+		useBaseURL      bool
+		useFilePath     bool
+		wantAddress     string
+		wantBaseURL     string
+		wantFileStorage string
+		wantErr         bool
 	}{
 		{
-			name:        "default values",
-			args:        []string{},
-			wantAddress: ":8080",
-			wantBaseURL: "http://localhost:8080",
+			name:            "default values",
+			args:            []string{},
+			wantAddress:     ":8080",
+			wantBaseURL:     "http://localhost:8080",
+			wantFileStorage: "/tmp/short-url-db.json",
 		},
 		{
-			name:        "custom values",
-			args:        []string{"-a", "localhost:8888", "-b", "http://localhost:8000"},
-			wantAddress: "localhost:8888",
-			wantBaseURL: "http://localhost:8000",
+			name:            "custom values",
+			args:            []string{"-a", "localhost:8888", "-b", "http://localhost:8000", "-f", "/tmp/flag.json"},
+			wantAddress:     "localhost:8888",
+			wantBaseURL:     "http://localhost:8000",
+			wantFileStorage: "/tmp/flag.json",
 		},
 		{
-			name:        "env values have higher priority than flags",
-			args:        []string{"-a", "localhost:8888", "-b", "http://localhost:8000"},
-			envAddress:  "localhost:9999",
-			envBaseURL:  "http://localhost:9000",
-			useAddress:  true,
-			useBaseURL:  true,
-			wantAddress: "localhost:9999",
-			wantBaseURL: "http://localhost:9000",
+			name:            "env values have higher priority than flags",
+			args:            []string{"-a", "localhost:8888", "-b", "http://localhost:8000", "-f", "/tmp/flag.json"},
+			envAddress:      "localhost:9999",
+			envBaseURL:      "http://localhost:9000",
+			envFilePath:     "/tmp/env.json",
+			useAddress:      true,
+			useBaseURL:      true,
+			useFilePath:     true,
+			wantAddress:     "localhost:9999",
+			wantBaseURL:     "http://localhost:9000",
+			wantFileStorage: "/tmp/env.json",
 		},
 		{
-			name:        "server env overrides only server address",
-			args:        []string{"-a", "localhost:8888", "-b", "http://localhost:8000"},
-			envAddress:  "localhost:9999",
-			useAddress:  true,
-			wantAddress: "localhost:9999",
-			wantBaseURL: "http://localhost:8000",
+			name:            "server env overrides only server address",
+			args:            []string{"-a", "localhost:8888", "-b", "http://localhost:8000"},
+			envAddress:      "localhost:9999",
+			useAddress:      true,
+			wantAddress:     "localhost:9999",
+			wantBaseURL:     "http://localhost:8000",
+			wantFileStorage: "/tmp/short-url-db.json",
 		},
 		{
-			name:        "base url env overrides only base url",
-			args:        []string{"-a", "localhost:8888", "-b", "http://localhost:8000"},
-			envBaseURL:  "http://localhost:9000",
-			useBaseURL:  true,
-			wantAddress: "localhost:8888",
-			wantBaseURL: "http://localhost:9000",
+			name:            "base url env overrides only base url",
+			args:            []string{"-a", "localhost:8888", "-b", "http://localhost:8000"},
+			envBaseURL:      "http://localhost:9000",
+			useBaseURL:      true,
+			wantAddress:     "localhost:8888",
+			wantBaseURL:     "http://localhost:9000",
+			wantFileStorage: "/tmp/short-url-db.json",
 		},
 		{
 			name:    "unknown flag",
@@ -66,6 +76,7 @@ func TestNew(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			setEnv(t, "SERVER_ADDRESS", test.envAddress, test.useAddress)
 			setEnv(t, "BASE_URL", test.envBaseURL, test.useBaseURL)
+			setEnv(t, "FILE_STORAGE_PATH", test.envFilePath, test.useFilePath)
 
 			cfg, err := New(test.args)
 			if test.wantErr {
@@ -85,6 +96,10 @@ func TestNew(t *testing.T) {
 
 			if cfg.BaseURL != test.wantBaseURL {
 				t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, test.wantBaseURL)
+			}
+
+			if cfg.FileStoragePath != test.wantFileStorage {
+				t.Errorf("FileStoragePath = %q, want %q", cfg.FileStoragePath, test.wantFileStorage)
 			}
 		})
 	}

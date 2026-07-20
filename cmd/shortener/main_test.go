@@ -15,15 +15,20 @@ import (
 	"go.uber.org/zap"
 )
 
-func newTestRouter() http.Handler {
-	storage := repository.NewURLStorage()
+func newTestRouter(t *testing.T) http.Handler {
+	t.Helper()
+
+	storage, err := repository.New("")
+	if err != nil {
+		t.Fatalf("repository.New() error = %v", err)
+	}
 	handlers := handler.New("http://localhost:8080", storage)
 	return newRouter(handlers, zap.NewNop().Sugar())
 }
 
 func TestRouter(t *testing.T) {
 	t.Run("shorten and expand", func(t *testing.T) {
-		router := newTestRouter()
+		router := newTestRouter(t)
 		originalURL := "http://example.com"
 
 		shortenRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
@@ -59,7 +64,7 @@ func TestRouter(t *testing.T) {
 	})
 
 	t.Run("json shorten and expand", func(t *testing.T) {
-		router := newTestRouter()
+		router := newTestRouter(t)
 		originalURL := "https://practicum.yandex.ru"
 
 		shortenRequest := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"`+originalURL+`"}`))
@@ -102,7 +107,7 @@ func TestRouter(t *testing.T) {
 	})
 
 	t.Run("json shorten returns gzip response", func(t *testing.T) {
-		router := newTestRouter()
+		router := newTestRouter(t)
 		originalURL := "https://practicum.yandex.ru"
 
 		request := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"`+originalURL+`"}`))
@@ -138,7 +143,7 @@ func TestRouter(t *testing.T) {
 	})
 
 	t.Run("json shorten accepts gzip request", func(t *testing.T) {
-		router := newTestRouter()
+		router := newTestRouter(t)
 		originalURL := "https://practicum.yandex.ru"
 		body := gzipBody(t, `{"url":"`+originalURL+`"}`)
 
@@ -169,7 +174,7 @@ func TestRouter(t *testing.T) {
 		request.Header.Set("Accept-Encoding", "gzip")
 		recorder := httptest.NewRecorder()
 
-		newTestRouter().ServeHTTP(recorder, request)
+		newTestRouter(t).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusCreated {
 			t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusCreated)
@@ -185,7 +190,7 @@ func TestRouter(t *testing.T) {
 		request.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 
-		newTestRouter().ServeHTTP(recorder, request)
+		newTestRouter(t).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -196,7 +201,7 @@ func TestRouter(t *testing.T) {
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		recorder := httptest.NewRecorder()
 
-		newTestRouter().ServeHTTP(recorder, request)
+		newTestRouter(t).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -207,7 +212,7 @@ func TestRouter(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/test", nil)
 		recorder := httptest.NewRecorder()
 
-		newTestRouter().ServeHTTP(recorder, request)
+		newTestRouter(t).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -218,7 +223,7 @@ func TestRouter(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/abc123", nil)
 		recorder := httptest.NewRecorder()
 
-		newTestRouter().ServeHTTP(recorder, request)
+		newTestRouter(t).ServeHTTP(recorder, request)
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
