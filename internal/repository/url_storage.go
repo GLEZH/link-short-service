@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 
@@ -19,6 +20,10 @@ func NewURLStorage() *URLStorage {
 	}
 }
 
+func New(filePath string) (*FileURLStorage, error) {
+	return NewFileURLStorage(filePath, NewURLStorage())
+}
+
 func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -31,10 +36,24 @@ func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
 	return url, nil
 }
 
-func (s *URLStorage) Get(id string) (entity.URL, bool) {
+func (s *URLStorage) Get(id string) (entity.URL, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	url, ok := s.urls[id]
-	return url, ok
+	if !ok {
+		return entity.URL{}, fmt.Errorf("%w: id %s", entity.ErrURLNotFound, id)
+	}
+
+	return url, nil
+}
+
+func (s *URLStorage) restore(url entity.URL) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.urls[url.ID] = url
+	if id, err := strconv.Atoi(url.ID); err == nil && id > s.nextID {
+		s.nextID = id
+	}
 }
