@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GLEZH/linkshrtservice/internal/entity"
@@ -36,6 +37,9 @@ func TestURLStorage_Get(t *testing.T) {
 		_, err := storage.Get("missing")
 		if !errors.Is(err, entity.ErrURLNotFound) {
 			t.Fatalf("Get() error = %v, want %v", err, entity.ErrURLNotFound)
+		}
+		if !strings.Contains(err.Error(), "missing") {
+			t.Fatalf("Get() error = %v, want id in error", err)
 		}
 	})
 }

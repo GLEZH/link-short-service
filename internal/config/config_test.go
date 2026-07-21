@@ -6,6 +6,15 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	oldAddress, hadAddress := os.LookupEnv("SERVER_ADDRESS")
+	oldBaseURL, hadBaseURL := os.LookupEnv("BASE_URL")
+	oldFilePath, hadFilePath := os.LookupEnv("FILE_STORAGE_PATH")
+	t.Cleanup(func() {
+		restoreEnv("SERVER_ADDRESS", oldAddress, hadAddress)
+		restoreEnv("BASE_URL", oldBaseURL, hadBaseURL)
+		restoreEnv("FILE_STORAGE_PATH", oldFilePath, hadFilePath)
+	})
+
 	tests := []struct {
 		name            string
 		args            []string
@@ -74,9 +83,19 @@ func TestNew(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			setEnv(t, "SERVER_ADDRESS", test.envAddress, test.useAddress)
-			setEnv(t, "BASE_URL", test.envBaseURL, test.useBaseURL)
-			setEnv(t, "FILE_STORAGE_PATH", test.envFilePath, test.useFilePath)
+			_ = os.Unsetenv("SERVER_ADDRESS")
+			_ = os.Unsetenv("BASE_URL")
+			_ = os.Unsetenv("FILE_STORAGE_PATH")
+
+			if test.useAddress {
+				t.Setenv("SERVER_ADDRESS", test.envAddress)
+			}
+			if test.useBaseURL {
+				t.Setenv("BASE_URL", test.envBaseURL)
+			}
+			if test.useFilePath {
+				t.Setenv("FILE_STORAGE_PATH", test.envFilePath)
+			}
 
 			cfg, err := New(test.args)
 			if test.wantErr {
@@ -105,25 +124,10 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func setEnv(t *testing.T, key, value string, ok bool) {
-	t.Helper()
-
-	oldValue, existed := os.LookupEnv(key)
+func restoreEnv(key, value string, ok bool) {
 	if ok {
-		if err := os.Setenv(key, value); err != nil {
-			t.Fatalf("os.Setenv() error = %v", err)
-		}
-	} else {
-		if err := os.Unsetenv(key); err != nil {
-			t.Fatalf("os.Unsetenv() error = %v", err)
-		}
+		_ = os.Setenv(key, value)
+		return
 	}
-
-	t.Cleanup(func() {
-		if existed {
-			_ = os.Setenv(key, oldValue)
-			return
-		}
-		_ = os.Unsetenv(key)
-	})
+	_ = os.Unsetenv(key)
 }

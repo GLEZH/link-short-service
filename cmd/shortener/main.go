@@ -1,12 +1,12 @@
 package main
 
 import (
+	"log"
 	"net/http"
 	"os"
 
 	"github.com/GLEZH/linkshrtservice/internal/config"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
-	"github.com/GLEZH/linkshrtservice/internal/logger"
 	"github.com/GLEZH/linkshrtservice/internal/middleware"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -16,29 +16,29 @@ import (
 func main() {
 	cfg, err := config.New(os.Args[1:])
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-
-	storage, err := repository.New(cfg.FileStoragePath)
-	if err != nil {
-		panic(err)
-	}
-	defer storage.Close()
-
-	handlers := handler.New(cfg.BaseURL, storage)
 
 	zapLogger, err := zap.NewDevelopment()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer zapLogger.Sync()
 
 	sugar := zapLogger.Sugar()
+
+	storage, err := repository.New(cfg.FileStoragePath)
+	if err != nil {
+		sugar.Fatalw("init storage", "error", err)
+	}
+	defer storage.Close()
+
+	handlers := handler.New(cfg.BaseURL, storage, sugar)
 	sugar.Infow("starting server", "addr", cfg.ServerAddress, "file_storage_path", cfg.FileStoragePath)
 
 	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar))
 	if err != nil {
-		panic(err)
+		sugar.Fatalw("start server", "error", err)
 	}
 }
 
@@ -57,5 +57,5 @@ func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler
 	router.Post("/api/shorten", handlers.ShortenURLJSON)
 	router.Get("/{id}", handlers.GetURL)
 
-	return logger.WithLogging(middleware.WithGzip(router), sugar)
+	return middleware.WithLogging(middleware.WithGzip(router), sugar)
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 type URLStorage interface {
@@ -19,6 +20,7 @@ type URLStorage interface {
 type Handler struct {
 	baseURL string
 	storage URLStorage
+	log     *zap.SugaredLogger
 }
 
 type shortenRequest struct {
@@ -29,10 +31,11 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
-func New(baseURL string, storage URLStorage) *Handler {
+func New(baseURL string, storage URLStorage, log *zap.SugaredLogger) *Handler {
 	return &Handler{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		storage: storage,
+		log:     log,
 	}
 }
 
@@ -45,7 +48,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := h.createShortURL(string(body))
 	if err != nil {
-		writeError(w, err)
+		h.writeError(w, err)
 		return
 	}
 
@@ -63,7 +66,7 @@ func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := h.createShortURL(request.URL)
 	if err != nil {
-		writeError(w, err)
+		h.writeError(w, err)
 		return
 	}
 
@@ -81,7 +84,7 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := h.storage.Get(id)
 	if err != nil {
-		writeError(w, err)
+		h.writeError(w, err)
 		return
 	}
 
@@ -103,13 +106,16 @@ func (h *Handler) createShortURL(originalURL string) (string, error) {
 	return h.baseURL + "/" + shortURL.ID, nil
 }
 
-func writeError(w http.ResponseWriter, err error) {
+func (h *Handler) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, entity.ErrInvalidURL):
 		w.WriteHeader(http.StatusBadRequest)
 	case errors.Is(err, entity.ErrURLNotFound):
 		w.WriteHeader(http.StatusBadRequest)
 	default:
-		w.WriteHeader(http.StatusBadRequest)
+		if h.log != nil {
+			h.log.Infow("internal handler error", "error", err)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }

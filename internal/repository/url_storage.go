@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 
@@ -8,38 +9,19 @@ import (
 )
 
 type URLStorage struct {
-	mu       sync.RWMutex
-	nextID   int
-	filePath string
-	urls     map[string]entity.URL
-	records  []record
+	mu     sync.RWMutex
+	nextID int
+	urls   map[string]entity.URL
 }
 
-func New(filePath string) (*URLStorage, error) {
-	storage := &URLStorage{
+func NewURLStorage() *URLStorage {
+	return &URLStorage{
 		urls: make(map[string]entity.URL),
 	}
+}
 
-	if filePath == "" {
-		return storage, nil
-	}
-
-	records, err := readRecords(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, rec := range records {
-		storage.urls[rec.ShortURL] = entity.URL{ID: rec.ShortURL, OriginalURL: rec.OriginalURL}
-		if id, convErr := strconv.Atoi(rec.UUID); convErr == nil && id > storage.nextID {
-			storage.nextID = id
-		}
-	}
-
-	storage.filePath = filePath
-	storage.records = records
-
-	return storage, nil
+func New(filePath string) (*FileURLStorage, error) {
+	return NewFileURLStorage(filePath, NewURLStorage())
 }
 
 func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
@@ -51,13 +33,6 @@ func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
 	url.ID = id
 	s.urls[id] = url
 
-	if s.filePath != "" {
-		s.records = append(s.records, record{UUID: id, ShortURL: id, OriginalURL: url.OriginalURL})
-		if err := writeRecords(s.filePath, s.records); err != nil {
-			return entity.URL{}, err
-		}
-	}
-
 	return url, nil
 }
 
@@ -67,12 +42,18 @@ func (s *URLStorage) Get(id string) (entity.URL, error) {
 
 	url, ok := s.urls[id]
 	if !ok {
-		return entity.URL{}, entity.ErrURLNotFound
+		return entity.URL{}, fmt.Errorf("%w: id %s", entity.ErrURLNotFound, id)
 	}
 
 	return url, nil
 }
 
-func (s *URLStorage) Close() error {
-	return nil
+func (s *URLStorage) restore(url entity.URL) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.urls[url.ID] = url
+	if id, err := strconv.Atoi(url.ID); err == nil && id > s.nextID {
+		s.nextID = id
+	}
 }

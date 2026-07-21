@@ -22,7 +22,7 @@ func newTestRouter(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("repository.New() error = %v", err)
 	}
-	handlers := handler.New("http://localhost:8080", storage)
+	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar())
 	return newRouter(handlers, zap.NewNop().Sugar())
 }
 
