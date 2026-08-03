@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +17,14 @@ import (
 	"go.uber.org/zap"
 )
 
+type testDatabase struct {
+	err error
+}
+
+func (d testDatabase) Ping(ctx context.Context) error {
+	return d.err
+}
+
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -22,7 +32,18 @@ func newTestRouter(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("repository.New() error = %v", err)
 	}
-	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar())
+	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), testDatabase{})
+	return newRouter(handlers, zap.NewNop().Sugar())
+}
+
+func newTestRouterWithDatabase(t *testing.T, db handler.Database) http.Handler {
+	t.Helper()
+
+	storage, err := repository.New("")
+	if err != nil {
+		t.Fatalf("repository.New() error = %v", err)
+	}
+	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), db)
 	return newRouter(handlers, zap.NewNop().Sugar())
 }
 
@@ -194,6 +215,28 @@ func TestRouter(t *testing.T) {
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("ping with database connection is ok", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/ping", nil)
+		recorder := httptest.NewRecorder()
+
+		newTestRouterWithDatabase(t, testDatabase{}).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusOK {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusOK)
+		}
+	})
+
+	t.Run("ping without database connection is internal error", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/ping", nil)
+		recorder := httptest.NewRecorder()
+
+		newTestRouterWithDatabase(t, testDatabase{err: errors.New("ping failed")}).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusInternalServerError {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusInternalServerError)
 		}
 	})
 

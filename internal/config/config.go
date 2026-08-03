@@ -10,6 +10,7 @@ type Config struct {
 	ServerAddress   string `env:"SERVER_ADDRESS"`
 	BaseURL         string `env:"BASE_URL"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+	DatabaseDSN     string `env:"DATABASE_DSN"`
 }
 
 func New(args []string) (*Config, error) {
@@ -19,6 +20,7 @@ func New(args []string) (*Config, error) {
 	flags.StringVar(&cfg.ServerAddress, "a", ":8080", "HTTP server address")
 	flags.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "base for short links")
 	flags.StringVar(&cfg.FileStoragePath, "f", "/tmp/short-url-db.json", "path to file storage")
+	flags.StringVar(&cfg.DatabaseDSN, "d", "", "database connection string")
 
 	if err := flags.Parse(args); err != nil {
 		return nil, err

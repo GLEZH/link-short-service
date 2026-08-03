@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/GLEZH/linkshrtservice/internal/config"
+	"github.com/GLEZH/linkshrtservice/internal/database"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
 	"github.com/GLEZH/linkshrtservice/internal/middleware"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
@@ -33,8 +34,19 @@ func main() {
 	}
 	defer storage.Close()
 
-	handlers := handler.New(cfg.BaseURL, storage, sugar)
-	sugar.Infow("starting server", "addr", cfg.ServerAddress, "file_storage_path", cfg.FileStoragePath)
+	db, err := database.New(cfg.DatabaseDSN)
+	if err != nil {
+		sugar.Fatalw("init database", "error", err)
+	}
+	defer db.Close()
+
+	handlers := handler.New(cfg.BaseURL, storage, sugar, db)
+	sugar.Infow(
+		"starting server",
+		"addr", cfg.ServerAddress,
+		"file_storage_path", cfg.FileStoragePath,
+		"database_configured", cfg.DatabaseDSN != "",
+	)
 
 	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar))
 	if err != nil {
@@ -55,6 +67,7 @@ func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler
 
 	router.Post("/", handlers.ShortenURL)
 	router.Post("/api/shorten", handlers.ShortenURLJSON)
+	router.Get("/ping", handlers.PingDB)
 	router.Get("/{id}", handlers.GetURL)
 
 	return middleware.WithLogging(middleware.WithGzip(router), sugar)

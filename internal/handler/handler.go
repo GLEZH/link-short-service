@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -17,10 +18,15 @@ type URLStorage interface {
 	Get(id string) (entity.URL, error)
 }
 
+type Database interface {
+	Ping(ctx context.Context) error
+}
+
 type Handler struct {
 	baseURL string
 	storage URLStorage
 	log     *zap.SugaredLogger
+	db      Database
 }
 
 type shortenRequest struct {
@@ -31,11 +37,12 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
-func New(baseURL string, storage URLStorage, log *zap.SugaredLogger) *Handler {
+func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database) *Handler {
 	return &Handler{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		storage: storage,
 		log:     log,
+		db:      db,
 	}
 }
 
@@ -90,6 +97,23 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", shortURL.OriginalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.Ping(r.Context()); err != nil {
+		if h.log != nil {
+			h.log.Infow("database ping failed", "error", err)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) createShortURL(originalURL string) (string, error) {

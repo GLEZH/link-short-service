@@ -25,7 +25,7 @@ func (s brokenStorage) Get(id string) (entity.URL, error) {
 
 func TestShortenURL_InternalError(t *testing.T) {
 	core, logs := observer.New(zapcore.InfoLevel)
-	handlers := New("http://localhost:8080", brokenStorage{}, zap.New(core).Sugar())
+	handlers := New("http://localhost:8080", brokenStorage{}, zap.New(core).Sugar(), nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://example.com"))
 	recorder := httptest.NewRecorder()
