@@ -66,6 +66,12 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := h.createShortURL(string(body))
 	if err != nil {
+		if errors.Is(err, entity.ErrURLAlreadyExists) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(shortURL))
+			return
+		}
 		h.writeError(w, err)
 		return
 	}
@@ -84,6 +90,12 @@ func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 
 	shortURL, err := h.createShortURL(request.URL)
 	if err != nil {
+		if errors.Is(err, entity.ErrURLAlreadyExists) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
+			return
+		}
 		h.writeError(w, err)
 		return
 	}
@@ -109,7 +121,7 @@ func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 	for _, item := range request {
 		originalURL := strings.TrimSpace(item.OriginalURL)
 		if originalURL == "" {
-			h.writeError(w, entity.ErrInvalidURL)
+			h.writeError(w, entity.NewInvalidURLError())
 			return
 		}
 		urls = append(urls, entity.URL{OriginalURL: originalURL})
@@ -171,11 +183,15 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createShortURL(originalURL string) (string, error) {
 	originalURL = strings.TrimSpace(originalURL)
 	if originalURL == "" {
-		return "", entity.ErrInvalidURL
+		return "", entity.NewInvalidURLError()
 	}
 
 	shortURL, err := h.storage.Save(entity.URL{OriginalURL: originalURL})
 	if err != nil {
+		var alreadyExists *entity.URLAlreadyExistsError
+		if errors.As(err, &alreadyExists) {
+			return h.baseURL + "/" + alreadyExists.URL.ID, err
+		}
 		return "", err
 	}
 

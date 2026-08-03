@@ -127,6 +127,75 @@ func TestRouter(t *testing.T) {
 		}
 	})
 
+	t.Run("text shorten duplicate returns conflict", func(t *testing.T) {
+		router := newTestRouter(t)
+		originalURL := "http://example.com/duplicate"
+
+		firstRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		firstRecorder := httptest.NewRecorder()
+		router.ServeHTTP(firstRecorder, firstRequest)
+
+		if firstRecorder.Code != http.StatusCreated {
+			t.Fatalf("first status code = %d, want %d", firstRecorder.Code, http.StatusCreated)
+		}
+
+		shortURL := firstRecorder.Body.String()
+		secondRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		secondRecorder := httptest.NewRecorder()
+		router.ServeHTTP(secondRecorder, secondRequest)
+
+		if secondRecorder.Code != http.StatusConflict {
+			t.Fatalf("second status code = %d, want %d", secondRecorder.Code, http.StatusConflict)
+		}
+		if secondRecorder.Body.String() != shortURL {
+			t.Errorf("body = %q, want %q", secondRecorder.Body.String(), shortURL)
+		}
+	})
+
+	t.Run("json shorten duplicate returns conflict", func(t *testing.T) {
+		router := newTestRouter(t)
+		originalURL := "https://practicum.yandex.ru/duplicate"
+		body := `{"url":"` + originalURL + `"}`
+
+		firstRequest := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+		firstRequest.Header.Set("Content-Type", "application/json")
+		firstRecorder := httptest.NewRecorder()
+		router.ServeHTTP(firstRecorder, firstRequest)
+
+		if firstRecorder.Code != http.StatusCreated {
+			t.Fatalf("first status code = %d, want %d", firstRecorder.Code, http.StatusCreated)
+		}
+
+		var firstResponse struct {
+			Result string `json:"result"`
+		}
+		if err := json.NewDecoder(firstRecorder.Result().Body).Decode(&firstResponse); err != nil {
+			t.Fatalf("json decode error = %v", err)
+		}
+
+		secondRequest := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+		secondRequest.Header.Set("Content-Type", "application/json")
+		secondRecorder := httptest.NewRecorder()
+		router.ServeHTTP(secondRecorder, secondRequest)
+
+		if secondRecorder.Code != http.StatusConflict {
+			t.Fatalf("second status code = %d, want %d", secondRecorder.Code, http.StatusConflict)
+		}
+		if contentType := secondRecorder.Header().Get("Content-Type"); contentType != "application/json" {
+			t.Errorf("Content-Type = %q, want %q", contentType, "application/json")
+		}
+
+		var secondResponse struct {
+			Result string `json:"result"`
+		}
+		if err := json.NewDecoder(secondRecorder.Result().Body).Decode(&secondResponse); err != nil {
+			t.Fatalf("json decode error = %v", err)
+		}
+		if secondResponse.Result != firstResponse.Result {
+			t.Errorf("result = %q, want %q", secondResponse.Result, firstResponse.Result)
+		}
+	})
+
 	t.Run("json shorten returns gzip response", func(t *testing.T) {
 		router := newTestRouter(t)
 		originalURL := "https://practicum.yandex.ru"

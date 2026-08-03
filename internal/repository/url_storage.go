@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"fmt"
 	"strconv"
 	"sync"
 
@@ -9,14 +8,16 @@ import (
 )
 
 type URLStorage struct {
-	mu     sync.RWMutex
-	nextID int
-	urls   map[string]entity.URL
+	mu            sync.RWMutex
+	nextID        int
+	urls          map[string]entity.URL
+	originalIndex map[string]string
 }
 
 func NewURLStorage() *URLStorage {
 	return &URLStorage{
-		urls: make(map[string]entity.URL),
+		urls:          make(map[string]entity.URL),
+		originalIndex: make(map[string]string),
 	}
 }
 
@@ -27,6 +28,11 @@ func New(filePath string) (*FileURLStorage, error) {
 func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if id, ok := s.originalIndex[url.OriginalURL]; ok {
+		existingURL := s.urls[id]
+		return existingURL, entity.NewURLAlreadyExistsError(existingURL)
+	}
 
 	return s.saveLocked(url), nil
 }
@@ -44,10 +50,15 @@ func (s *URLStorage) SaveBatch(urls []entity.URL) ([]entity.URL, error) {
 }
 
 func (s *URLStorage) saveLocked(url entity.URL) entity.URL {
+	if id, ok := s.originalIndex[url.OriginalURL]; ok {
+		return s.urls[id]
+	}
+
 	s.nextID++
 	id := strconv.Itoa(s.nextID)
 	url.ID = id
 	s.urls[id] = url
+	s.originalIndex[url.OriginalURL] = id
 
 	return url
 }
@@ -58,7 +69,7 @@ func (s *URLStorage) Get(id string) (entity.URL, error) {
 
 	url, ok := s.urls[id]
 	if !ok {
-		return entity.URL{}, fmt.Errorf("%w: id %s", entity.ErrURLNotFound, id)
+		return entity.URL{}, entity.NewURLNotFoundError(id)
 	}
 
 	return url, nil
@@ -69,6 +80,7 @@ func (s *URLStorage) restore(url entity.URL) {
 	defer s.mu.Unlock()
 
 	s.urls[url.ID] = url
+	s.originalIndex[url.OriginalURL] = url.ID
 	if id, err := strconv.Atoi(url.ID); err == nil && id > s.nextID {
 		s.nextID = id
 	}
