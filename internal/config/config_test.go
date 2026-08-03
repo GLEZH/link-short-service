@@ -39,7 +39,7 @@ func TestNew(t *testing.T) {
 			args:            []string{},
 			wantAddress:     ":8080",
 			wantBaseURL:     "http://localhost:8080",
-			wantFileStorage: "/tmp/short-url-db.json",
+			wantFileStorage: "",
 			wantDatabaseDSN: "",
 		},
 		{
@@ -73,7 +73,7 @@ func TestNew(t *testing.T) {
 			useAddress:      true,
 			wantAddress:     "localhost:9999",
 			wantBaseURL:     "http://localhost:8000",
-			wantFileStorage: "/tmp/short-url-db.json",
+			wantFileStorage: "",
 			wantDatabaseDSN: "",
 		},
 		{
@@ -83,7 +83,17 @@ func TestNew(t *testing.T) {
 			useBaseURL:      true,
 			wantAddress:     "localhost:8888",
 			wantBaseURL:     "http://localhost:9000",
-			wantFileStorage: "/tmp/short-url-db.json",
+			wantFileStorage: "",
+			wantDatabaseDSN: "",
+		},
+		{
+			name:            "file storage env",
+			args:            []string{},
+			envFilePath:     "/tmp/env.json",
+			useFilePath:     true,
+			wantAddress:     ":8080",
+			wantBaseURL:     "http://localhost:8080",
+			wantFileStorage: "/tmp/env.json",
 			wantDatabaseDSN: "",
 		},
 		{

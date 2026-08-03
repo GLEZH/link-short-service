@@ -28,17 +28,14 @@ func main() {
 
 	sugar := zapLogger.Sugar()
 
-	storage, err := repository.New(cfg.FileStoragePath)
-	if err != nil {
-		sugar.Fatalw("init storage", "error", err)
-	}
-	defer storage.Close()
-
 	db, err := database.New(cfg.DatabaseDSN)
 	if err != nil {
 		sugar.Fatalw("init database", "error", err)
 	}
 	defer db.Close()
+
+	storage, closeStorage := newStorage(cfg, db, sugar)
+	defer closeStorage()
 
 	handlers := handler.New(cfg.BaseURL, storage, sugar, db)
 	sugar.Infow(
@@ -52,6 +49,27 @@ func main() {
 	if err != nil {
 		sugar.Fatalw("start server", "error", err)
 	}
+}
+
+func newStorage(cfg *config.Config, db *database.DB, sugar *zap.SugaredLogger) (handler.URLStorage, func()) {
+	if cfg.DatabaseDSN != "" {
+		if err := db.Migrate(); err != nil {
+			sugar.Fatalw("run migrations", "error", err)
+		}
+		return repository.NewDatabaseURLStorage(db.SQLDB()), func() {}
+	}
+
+	if cfg.FileStoragePath != "" {
+		storage, err := repository.New(cfg.FileStoragePath)
+		if err != nil {
+			sugar.Fatalw("init file storage", "error", err)
+		}
+		return storage, func() {
+			_ = storage.Close()
+		}
+	}
+
+	return repository.NewURLStorage(), func() {}
 }
 
 func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler {
