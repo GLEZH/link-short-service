@@ -1,5 +1,7 @@
 include .env
 
+COVERAGE_FILE = coverage.out
+
 export PROJECT_NAME
 export DATABASE_DSN
 
@@ -20,7 +22,8 @@ migrate:
 	go run github.com/pressly/goose/v3/cmd/goose -dir internal/database/migrations postgres "$(DATABASE_DSN)" up
 
 test:
-	go run gotest.tools/gotestsum@v1.13.0 --format pkgname -- -count=1 ./...
+	go run gotest.tools/gotestsum@v1.13.0 --format pkgname -- -coverpkg=./... -coverprofile=$(COVERAGE_FILE) -covermode=atomic -count=1 ./...
+	go tool cover -func=$(COVERAGE_FILE) | tail -n 1
 
 run:
 	DATABASE_DSN="$(DATABASE_DSN)" go run ./cmd/shortener

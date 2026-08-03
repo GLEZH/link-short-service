@@ -85,6 +85,7 @@ func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler
 
 	router.Post("/", handlers.ShortenURL)
 	router.Post("/api/shorten", handlers.ShortenURLJSON)
+	router.Post("/api/shorten/batch", handlers.ShortenURLBatch)
 	router.Get("/ping", handlers.PingDB)
 	router.Get("/{id}", handlers.GetURL)
 

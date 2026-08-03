@@ -73,6 +73,34 @@ func (s *FileURLStorage) Save(url entity.URL) (entity.URL, error) {
 	return savedURL, nil
 }
 
+func (s *FileURLStorage) SaveBatch(urls []entity.URL) ([]entity.URL, error) {
+	savedURLs, err := s.URLStorage.SaveBatch(urls)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.filePath == "" {
+		return savedURLs, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, savedURL := range savedURLs {
+		s.records = append(s.records, record{
+			UUID:        savedURL.ID,
+			ShortURL:    savedURL.ID,
+			OriginalURL: savedURL.OriginalURL,
+		})
+	}
+
+	if err := writeRecords(s.filePath, s.records); err != nil {
+		return nil, err
+	}
+
+	return savedURLs, nil
+}
+
 func (s *FileURLStorage) Close() error {
 	return nil
 }

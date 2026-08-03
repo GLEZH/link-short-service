@@ -28,12 +28,28 @@ func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.saveLocked(url), nil
+}
+
+func (s *URLStorage) SaveBatch(urls []entity.URL) ([]entity.URL, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	savedURLs := make([]entity.URL, 0, len(urls))
+	for _, url := range urls {
+		savedURLs = append(savedURLs, s.saveLocked(url))
+	}
+
+	return savedURLs, nil
+}
+
+func (s *URLStorage) saveLocked(url entity.URL) entity.URL {
 	s.nextID++
 	id := strconv.Itoa(s.nextID)
 	url.ID = id
 	s.urls[id] = url
 
-	return url, nil
+	return url
 }
 
 func (s *URLStorage) Get(id string) (entity.URL, error) {

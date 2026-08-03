@@ -37,6 +37,40 @@ func (s *DatabaseURLStorage) Save(url entity.URL) (entity.URL, error) {
 	return url, nil
 }
 
+func (s *DatabaseURLStorage) SaveBatch(urls []entity.URL) ([]entity.URL, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin save batch: %w", err)
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "INSERT INTO shortened_urls (original_url) VALUES ($1) RETURNING id")
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("prepare save batch: %w", err)
+	}
+	defer stmt.Close()
+
+	savedURLs := make([]entity.URL, 0, len(urls))
+	for _, url := range urls {
+		var id int64
+		if err = stmt.QueryRowContext(ctx, url.OriginalURL).Scan(&id); err != nil {
+			_ = tx.Rollback()
+			return nil, fmt.Errorf("save batch url: %w", err)
+		}
+		url.ID = strconv.FormatInt(id, 10)
+		savedURLs = append(savedURLs, url)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit save batch: %w", err)
+	}
+
+	return savedURLs, nil
+}
+
 func (s *DatabaseURLStorage) Get(id string) (entity.URL, error) {
 	urlID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {

@@ -104,3 +104,37 @@ func TestURLStorage_Persistence(t *testing.T) {
 		t.Errorf("OriginalURL = %q, want %q", gotURL.OriginalURL, originalURL)
 	}
 }
+
+func TestURLStorage_BatchPersistence(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "short-url-db.json")
+
+	storage, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	savedURLs, err := storage.SaveBatch([]entity.URL{
+		{OriginalURL: "http://yandex.ru"},
+		{OriginalURL: "http://practicum.yandex.ru"},
+	})
+	if err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+	if len(savedURLs) != 2 {
+		t.Fatalf("saved urls count = %d, want 2", len(savedURLs))
+	}
+
+	restored, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	gotURL, err := restored.Get(savedURLs[1].ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if gotURL.OriginalURL != "http://practicum.yandex.ru" {
+		t.Errorf("OriginalURL = %q, want %q", gotURL.OriginalURL, "http://practicum.yandex.ru")
+	}
+}

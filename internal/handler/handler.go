@@ -15,6 +15,7 @@ import (
 
 type URLStorage interface {
 	Save(url entity.URL) (entity.URL, error)
+	SaveBatch(urls []entity.URL) ([]entity.URL, error)
 	Get(id string) (entity.URL, error)
 }
 
@@ -35,6 +36,16 @@ type shortenRequest struct {
 
 type shortenResponse struct {
 	Result string `json:"result"`
+}
+
+type shortenBatchRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+type shortenBatchResponse struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
 }
 
 func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database) *Handler {
@@ -80,6 +91,47 @@ func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
+}
+
+func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
+	var request []shortenBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if len(request) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	urls := make([]entity.URL, 0, len(request))
+	for _, item := range request {
+		originalURL := strings.TrimSpace(item.OriginalURL)
+		if originalURL == "" {
+			h.writeError(w, entity.ErrInvalidURL)
+			return
+		}
+		urls = append(urls, entity.URL{OriginalURL: originalURL})
+	}
+
+	savedURLs, err := h.storage.SaveBatch(urls)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+
+	response := make([]shortenBatchResponse, 0, len(savedURLs))
+	for i, savedURL := range savedURLs {
+		response = append(response, shortenBatchResponse{
+			CorrelationID: request[i].CorrelationID,
+			ShortURL:      h.baseURL + "/" + savedURL.ID,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {

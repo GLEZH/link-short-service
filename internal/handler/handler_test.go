@@ -19,6 +19,10 @@ func (s brokenStorage) Save(url entity.URL) (entity.URL, error) {
 	return entity.URL{}, errors.New("save failed")
 }
 
+func (s brokenStorage) SaveBatch(urls []entity.URL) ([]entity.URL, error) {
+	return nil, errors.New("save batch failed")
+}
+
 func (s brokenStorage) Get(id string) (entity.URL, error) {
 	return entity.URL{}, errors.New("get failed")
 }
