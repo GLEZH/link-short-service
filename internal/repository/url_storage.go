@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"strconv"
 	"sync"
 
@@ -25,7 +26,7 @@ func New(filePath string) (*FileURLStorage, error) {
 	return NewFileURLStorage(filePath, NewURLStorage())
 }
 
-func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
+func (s *URLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -37,7 +38,7 @@ func (s *URLStorage) Save(url entity.URL) (entity.URL, error) {
 	return s.saveLocked(url), nil
 }
 
-func (s *URLStorage) SaveBatch(urls []entity.URL) ([]entity.URL, error) {
+func (s *URLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -63,7 +64,7 @@ func (s *URLStorage) saveLocked(url entity.URL) entity.URL {
 	return url
 }
 
-func (s *URLStorage) Get(id string) (entity.URL, error) {
+func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

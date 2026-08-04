@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/jackc/pgerrcode"
@@ -21,8 +20,8 @@ func NewDatabaseURLStorage(db *sql.DB) *DatabaseURLStorage {
 	return &DatabaseURLStorage{db: db}
 }
 
-func (s *DatabaseURLStorage) Save(url entity.URL) (entity.URL, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+func (s *DatabaseURLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, error) {
+	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
 	defer cancel()
 
 	var id int64
@@ -46,8 +45,8 @@ func (s *DatabaseURLStorage) Save(url entity.URL) (entity.URL, error) {
 	return url, nil
 }
 
-func (s *DatabaseURLStorage) SaveBatch(urls []entity.URL) ([]entity.URL, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+func (s *DatabaseURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error) {
+	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
 	defer cancel()
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -107,13 +106,13 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
 }
 
-func (s *DatabaseURLStorage) Get(id string) (entity.URL, error) {
+func (s *DatabaseURLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	urlID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return entity.URL{}, entity.NewURLNotFoundError(id)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
 	defer cancel()
 
 	url := entity.URL{ID: id}

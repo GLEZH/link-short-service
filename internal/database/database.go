@@ -22,7 +22,7 @@ type DB struct {
 
 func New(dsn string) (*DB, error) {
 	if dsn == "" {
-		return &DB{}, nil
+		return nil, nil
 	}
 
 	db, err := sql.Open("pgx", dsn)

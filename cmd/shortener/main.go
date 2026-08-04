@@ -32,7 +32,9 @@ func main() {
 	if err != nil {
 		sugar.Fatalw("init database", "error", err)
 	}
-	defer db.Close()
+	if db != nil {
+		defer db.Close()
+	}
 
 	storage, closeStorage := newStorage(cfg, db, sugar)
 	defer closeStorage()

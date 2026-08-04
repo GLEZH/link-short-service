@@ -14,9 +14,9 @@ import (
 )
 
 type URLStorage interface {
-	Save(url entity.URL) (entity.URL, error)
-	SaveBatch(urls []entity.URL) ([]entity.URL, error)
-	Get(id string) (entity.URL, error)
+	Save(ctx context.Context, url entity.URL) (entity.URL, error)
+	SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error)
+	Get(ctx context.Context, id string) (entity.URL, error)
 }
 
 type Database interface {
@@ -64,7 +64,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, err := h.createShortURL(string(body))
+	shortURL, err := h.createShortURL(r.Context(), string(body))
 	if err != nil {
 		if errors.Is(err, entity.ErrURLAlreadyExists) {
 			w.Header().Set("Content-Type", "text/plain")
@@ -88,7 +88,7 @@ func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, err := h.createShortURL(request.URL)
+	shortURL, err := h.createShortURL(r.Context(), request.URL)
 	if err != nil {
 		if errors.Is(err, entity.ErrURLAlreadyExists) {
 			w.Header().Set("Content-Type", "application/json")
@@ -127,7 +127,7 @@ func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 		urls = append(urls, entity.URL{OriginalURL: originalURL})
 	}
 
-	savedURLs, err := h.storage.SaveBatch(urls)
+	savedURLs, err := h.storage.SaveBatch(r.Context(), urls)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -153,7 +153,7 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, err := h.storage.Get(id)
+	shortURL, err := h.storage.Get(r.Context(), id)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -180,13 +180,13 @@ func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *Handler) createShortURL(originalURL string) (string, error) {
+func (h *Handler) createShortURL(ctx context.Context, originalURL string) (string, error) {
 	originalURL = strings.TrimSpace(originalURL)
 	if originalURL == "" {
 		return "", entity.NewInvalidURLError()
 	}
 
-	shortURL, err := h.storage.Save(entity.URL{OriginalURL: originalURL})
+	shortURL, err := h.storage.Save(ctx, entity.URL{OriginalURL: originalURL})
 	if err != nil {
 		var alreadyExists *entity.URLAlreadyExistsError
 		if errors.As(err, &alreadyExists) {
