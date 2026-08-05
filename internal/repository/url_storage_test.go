@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,18 +13,19 @@ import (
 )
 
 func TestURLStorage_Get(t *testing.T) {
+	ctx := context.Background()
 	storage, err := New("")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
 	t.Run("existing url", func(t *testing.T) {
-		savedURL, err := storage.Save(entity.URL{OriginalURL: "http://example.com"})
+		savedURL, err := storage.Save(ctx, entity.URL{OriginalURL: "http://example.com"})
 		if err != nil {
 			t.Fatalf("Save() error = %v", err)
 		}
 
-		gotURL, err := storage.Get(savedURL.ID)
+		gotURL, err := storage.Get(ctx, savedURL.ID)
 		if err != nil {
 			t.Fatalf("Get() error = %v", err)
 		}
@@ -34,7 +36,7 @@ func TestURLStorage_Get(t *testing.T) {
 	})
 
 	t.Run("missing url", func(t *testing.T) {
-		_, err := storage.Get("missing")
+		_, err := storage.Get(ctx, "missing")
 		if !errors.Is(err, entity.ErrURLNotFound) {
 			t.Fatalf("Get() error = %v, want %v", err, entity.ErrURLNotFound)
 		}
@@ -45,6 +47,7 @@ func TestURLStorage_Get(t *testing.T) {
 }
 
 func TestURLStorage_Persistence(t *testing.T) {
+	ctx := context.Background()
 	filePath := filepath.Join(t.TempDir(), "short-url-db.json")
 	originalURL := "http://yandex.ru"
 
@@ -53,7 +56,7 @@ func TestURLStorage_Persistence(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	savedURL, err := storage.Save(entity.URL{OriginalURL: originalURL})
+	savedURL, err := storage.Save(ctx, entity.URL{OriginalURL: originalURL})
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -95,12 +98,47 @@ func TestURLStorage_Persistence(t *testing.T) {
 		_ = restored.Close()
 	})
 
-	gotURL, err := restored.Get(savedURL.ID)
+	gotURL, err := restored.Get(ctx, savedURL.ID)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
 
 	if gotURL.OriginalURL != originalURL {
 		t.Errorf("OriginalURL = %q, want %q", gotURL.OriginalURL, originalURL)
+	}
+}
+
+func TestURLStorage_BatchPersistence(t *testing.T) {
+	ctx := context.Background()
+	filePath := filepath.Join(t.TempDir(), "short-url-db.json")
+
+	storage, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	savedURLs, err := storage.SaveBatch(ctx, []entity.URL{
+		{OriginalURL: "http://yandex.ru"},
+		{OriginalURL: "http://practicum.yandex.ru"},
+	})
+	if err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+	if len(savedURLs) != 2 {
+		t.Fatalf("saved urls count = %d, want 2", len(savedURLs))
+	}
+
+	restored, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	gotURL, err := restored.Get(ctx, savedURLs[1].ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if gotURL.OriginalURL != "http://practicum.yandex.ru" {
+		t.Errorf("OriginalURL = %q, want %q", gotURL.OriginalURL, "http://practicum.yandex.ru")
 	}
 }

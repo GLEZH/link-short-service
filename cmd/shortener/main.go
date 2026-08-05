@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/GLEZH/linkshrtservice/internal/config"
+	"github.com/GLEZH/linkshrtservice/internal/database"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
 	"github.com/GLEZH/linkshrtservice/internal/middleware"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
@@ -27,19 +28,50 @@ func main() {
 
 	sugar := zapLogger.Sugar()
 
-	storage, err := repository.New(cfg.FileStoragePath)
+	db, err := database.New(cfg.DatabaseDSN)
 	if err != nil {
-		sugar.Fatalw("init storage", "error", err)
+		sugar.Fatalw("init database", "error", err)
 	}
-	defer storage.Close()
+	if db != nil {
+		defer db.Close()
+	}
 
-	handlers := handler.New(cfg.BaseURL, storage, sugar)
-	sugar.Infow("starting server", "addr", cfg.ServerAddress, "file_storage_path", cfg.FileStoragePath)
+	storage, closeStorage := newStorage(cfg, db, sugar)
+	defer closeStorage()
+
+	handlers := handler.New(cfg.BaseURL, storage, sugar, db)
+	sugar.Infow(
+		"starting server",
+		"addr", cfg.ServerAddress,
+		"file_storage_path", cfg.FileStoragePath,
+		"database_configured", cfg.DatabaseDSN != "",
+	)
 
 	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar))
 	if err != nil {
 		sugar.Fatalw("start server", "error", err)
 	}
+}
+
+func newStorage(cfg *config.Config, db *database.DB, sugar *zap.SugaredLogger) (handler.URLStorage, func()) {
+	if cfg.DatabaseDSN != "" {
+		if err := db.Migrate(); err != nil {
+			sugar.Fatalw("run migrations", "error", err)
+		}
+		return repository.NewDatabaseURLStorage(db.SQLDB()), func() {}
+	}
+
+	if cfg.FileStoragePath != "" {
+		storage, err := repository.New(cfg.FileStoragePath)
+		if err != nil {
+			sugar.Fatalw("init file storage", "error", err)
+		}
+		return storage, func() {
+			_ = storage.Close()
+		}
+	}
+
+	return repository.NewURLStorage(), func() {}
 }
 
 func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler {
@@ -55,6 +87,8 @@ func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler
 
 	router.Post("/", handlers.ShortenURL)
 	router.Post("/api/shorten", handlers.ShortenURLJSON)
+	router.Post("/api/shorten/batch", handlers.ShortenURLBatch)
+	router.Get("/ping", handlers.PingDB)
 	router.Get("/{id}", handlers.GetURL)
 
 	return middleware.WithLogging(middleware.WithGzip(router), sugar)

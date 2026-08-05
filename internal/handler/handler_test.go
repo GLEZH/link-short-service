@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,17 +16,21 @@ import (
 
 type brokenStorage struct{}
 
-func (s brokenStorage) Save(url entity.URL) (entity.URL, error) {
+func (s brokenStorage) Save(ctx context.Context, url entity.URL) (entity.URL, error) {
 	return entity.URL{}, errors.New("save failed")
 }
 
-func (s brokenStorage) Get(id string) (entity.URL, error) {
+func (s brokenStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error) {
+	return nil, errors.New("save batch failed")
+}
+
+func (s brokenStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	return entity.URL{}, errors.New("get failed")
 }
 
 func TestShortenURL_InternalError(t *testing.T) {
 	core, logs := observer.New(zapcore.InfoLevel)
-	handlers := New("http://localhost:8080", brokenStorage{}, zap.New(core).Sugar())
+	handlers := New("http://localhost:8080", brokenStorage{}, zap.New(core).Sugar(), nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://example.com"))
 	recorder := httptest.NewRecorder()
