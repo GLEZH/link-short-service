@@ -9,9 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/GLEZH/linkshrtservice/internal/config"
+	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
 	"go.uber.org/zap"
@@ -319,6 +322,34 @@ func TestRouter(t *testing.T) {
 		}
 	})
 
+	t.Run("json batch with empty url is bad request", func(t *testing.T) {
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/api/shorten/batch",
+			strings.NewReader(`[{"correlation_id":"first","original_url":""}]`),
+		)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		newTestRouter(t).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("json batch with bad json is bad request", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(`{`))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+
+		newTestRouter(t).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
+
 	t.Run("json batch shorten returns gzip response", func(t *testing.T) {
 		requestBody := `[{"correlation_id":"first","original_url":"https://practicum.yandex.ru"}]`
 		request := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(requestBody))
@@ -439,6 +470,17 @@ func TestRouter(t *testing.T) {
 		}
 	})
 
+	t.Run("get missing id is bad request", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/missing", nil)
+		recorder := httptest.NewRecorder()
+
+		newTestRouter(t).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
+
 	t.Run("post wrong path is bad request", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodPost, "/test", nil)
 		recorder := httptest.NewRecorder()
@@ -458,6 +500,39 @@ func TestRouter(t *testing.T) {
 
 		if recorder.Code != http.StatusBadRequest {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
+		}
+	})
+}
+
+func TestNewStorage(t *testing.T) {
+	t.Run("memory storage", func(t *testing.T) {
+		storage, closeStorage := newStorage(&config.Config{}, nil, zap.NewNop().Sugar())
+		defer closeStorage()
+
+		savedURL, err := storage.Save(context.Background(), entity.URL{OriginalURL: "http://example.com"})
+		if err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		if savedURL.ID == "" {
+			t.Fatal("ID is empty")
+		}
+	})
+
+	t.Run("file storage", func(t *testing.T) {
+		filePath := filepath.Join(t.TempDir(), "short-url-db.json")
+		cfg := &config.Config{FileStoragePath: filePath}
+
+		storage, closeStorage := newStorage(cfg, nil, zap.NewNop().Sugar())
+		defer closeStorage()
+
+		savedURL, err := storage.Save(context.Background(), entity.URL{OriginalURL: "http://example.com"})
+		if err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		if savedURL.ID == "" {
+			t.Fatal("ID is empty")
 		}
 	})
 }

@@ -142,3 +142,38 @@ func TestURLStorage_BatchPersistence(t *testing.T) {
 		t.Errorf("OriginalURL = %q, want %q", gotURL.OriginalURL, "http://practicum.yandex.ru")
 	}
 }
+
+func TestURLStorage_BadPersistenceFile(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "short-url-db.json")
+	if err := os.WriteFile(filePath, []byte("{"), 0666); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	_, err := New(filePath)
+	if err == nil {
+		t.Fatal("New() error = nil, want error")
+	}
+
+	if !strings.Contains(err.Error(), "unmarshal records") {
+		t.Fatalf("New() error = %v, want unmarshal records", err)
+	}
+}
+
+func TestURLStorage_SavePersistenceError(t *testing.T) {
+	ctx := context.Background()
+	filePath := filepath.Join(t.TempDir(), "missing", "short-url-db.json")
+
+	storage, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = storage.Save(ctx, entity.URL{OriginalURL: "http://example.com"})
+	if err == nil {
+		t.Fatal("Save() error = nil, want error")
+	}
+
+	if !strings.Contains(err.Error(), "create temp file") {
+		t.Fatalf("Save() error = %v, want create temp file", err)
+	}
+}
