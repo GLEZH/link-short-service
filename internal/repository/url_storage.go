@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -74,6 +75,28 @@ func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	}
 
 	return url, nil
+}
+
+func (s *URLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.URL, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	urls := make([]entity.URL, 0)
+	for _, url := range s.urls {
+		if url.UserID == userID {
+			urls = append(urls, url)
+		}
+	}
+	sort.Slice(urls, func(i, j int) bool {
+		leftID, leftErr := strconv.Atoi(urls[i].ID)
+		rightID, rightErr := strconv.Atoi(urls[j].ID)
+		if leftErr != nil || rightErr != nil {
+			return urls[i].ID < urls[j].ID
+		}
+		return leftID < rightID
+	})
+
+	return urls, nil
 }
 
 func (s *URLStorage) restore(url entity.URL) {

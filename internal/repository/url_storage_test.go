@@ -56,7 +56,7 @@ func TestURLStorage_Persistence(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	savedURL, err := storage.Save(ctx, entity.URL{OriginalURL: originalURL})
+	savedURL, err := storage.Save(ctx, entity.URL{OriginalURL: originalURL, UserID: "user-id"})
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -90,6 +90,10 @@ func TestURLStorage_Persistence(t *testing.T) {
 		t.Errorf("OriginalURL = %q, want %q", records[0].OriginalURL, originalURL)
 	}
 
+	if records[0].UserID != "user-id" {
+		t.Errorf("UserID = %q, want %q", records[0].UserID, "user-id")
+	}
+
 	restored, err := New(filePath)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -108,6 +112,35 @@ func TestURLStorage_Persistence(t *testing.T) {
 	}
 }
 
+func TestURLStorage_GetByUserID(t *testing.T) {
+	ctx := context.Background()
+	storage, err := New("")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = storage.Save(ctx, entity.URL{OriginalURL: "http://first.example.com", UserID: "first-user"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	_, err = storage.Save(ctx, entity.URL{OriginalURL: "http://second.example.com", UserID: "second-user"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	urls, err := storage.GetByUserID(ctx, "first-user")
+	if err != nil {
+		t.Fatalf("GetByUserID() error = %v", err)
+	}
+
+	if len(urls) != 1 {
+		t.Fatalf("urls count = %d, want 1", len(urls))
+	}
+	if urls[0].OriginalURL != "http://first.example.com" {
+		t.Errorf("OriginalURL = %q, want %q", urls[0].OriginalURL, "http://first.example.com")
+	}
+}
+
 func TestURLStorage_BatchPersistence(t *testing.T) {
 	ctx := context.Background()
 	filePath := filepath.Join(t.TempDir(), "short-url-db.json")
@@ -118,8 +151,8 @@ func TestURLStorage_BatchPersistence(t *testing.T) {
 	}
 
 	savedURLs, err := storage.SaveBatch(ctx, []entity.URL{
-		{OriginalURL: "http://yandex.ru"},
-		{OriginalURL: "http://practicum.yandex.ru"},
+		{OriginalURL: "http://yandex.ru", UserID: "user-id"},
+		{OriginalURL: "http://practicum.yandex.ru", UserID: "user-id"},
 	})
 	if err != nil {
 		t.Fatalf("SaveBatch() error = %v", err)

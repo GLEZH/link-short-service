@@ -27,8 +27,9 @@ func (s *DatabaseURLStorage) Save(ctx context.Context, url entity.URL) (entity.U
 	var id int64
 	err := s.db.QueryRowContext(
 		ctx,
-		"INSERT INTO shortened_urls (original_url) VALUES ($1) RETURNING id",
+		"INSERT INTO shortened_urls (original_url, user_id) VALUES ($1, $2) RETURNING id",
 		url.OriginalURL,
+		url.UserID,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -55,8 +56,8 @@ func (s *DatabaseURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) (
 	}
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO shortened_urls (original_url)
-		VALUES ($1)
+		INSERT INTO shortened_urls (original_url, user_id)
+		VALUES ($1, $2)
 		ON CONFLICT (original_url) DO UPDATE SET original_url = EXCLUDED.original_url
 		RETURNING id
 	`)
@@ -69,7 +70,7 @@ func (s *DatabaseURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) (
 	savedURLs := make([]entity.URL, 0, len(urls))
 	for _, url := range urls {
 		var id int64
-		if err = stmt.QueryRowContext(ctx, url.OriginalURL).Scan(&id); err != nil {
+		if err = stmt.QueryRowContext(ctx, url.OriginalURL, url.UserID).Scan(&id); err != nil {
 			_ = tx.Rollback()
 			return nil, fmt.Errorf("save batch url: %w", err)
 		}
@@ -129,4 +130,35 @@ func (s *DatabaseURLStorage) Get(ctx context.Context, id string) (entity.URL, er
 	}
 
 	return url, nil
+}
+
+func (s *DatabaseURLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.URL, error) {
+	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
+	defer cancel()
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		"SELECT id, original_url FROM shortened_urls WHERE user_id = $1 ORDER BY id",
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get urls by user id: %w", err)
+	}
+	defer rows.Close()
+
+	urls := make([]entity.URL, 0)
+	for rows.Next() {
+		var id int64
+		url := entity.URL{UserID: userID}
+		if err = rows.Scan(&id, &url.OriginalURL); err != nil {
+			return nil, fmt.Errorf("scan user url: %w", err)
+		}
+		url.ID = strconv.FormatInt(id, 10)
+		urls = append(urls, url)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("read user urls: %w", err)
+	}
+
+	return urls, nil
 }

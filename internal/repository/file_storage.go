@@ -16,6 +16,7 @@ type record struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+	UserID      string `json:"user_id"`
 }
 
 type FileURLStorage struct {
@@ -41,7 +42,7 @@ func NewFileURLStorage(filePath string, storage *URLStorage) (*FileURLStorage, e
 	}
 
 	for _, rec := range records {
-		storage.restore(entity.URL{ID: rec.ShortURL, OriginalURL: rec.OriginalURL})
+		storage.restore(entity.URL{ID: rec.ShortURL, OriginalURL: rec.OriginalURL, UserID: rec.UserID})
 	}
 	fileStorage.records = records
 
@@ -65,6 +66,7 @@ func (s *FileURLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, 
 		UUID:        savedURL.ID,
 		ShortURL:    savedURL.ID,
 		OriginalURL: savedURL.OriginalURL,
+		UserID:      savedURL.UserID,
 	})
 
 	if err := writeRecords(s.filePath, s.records); err != nil {
@@ -92,6 +94,7 @@ func (s *FileURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]en
 			UUID:        savedURL.ID,
 			ShortURL:    savedURL.ID,
 			OriginalURL: savedURL.OriginalURL,
+			UserID:      savedURL.UserID,
 		})
 	}
 

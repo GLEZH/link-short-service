@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/config"
 	"github.com/GLEZH/linkshrtservice/internal/database"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
@@ -47,7 +48,7 @@ func main() {
 		"database_configured", cfg.DatabaseDSN != "",
 	)
 
-	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar))
+	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar, auth.NewManager(cfg.AuthSecret)))
 	if err != nil {
 		sugar.Fatalw("start server", "error", err)
 	}
@@ -74,7 +75,7 @@ func newStorage(cfg *config.Config, db *database.DB, sugar *zap.SugaredLogger) (
 	return repository.NewURLStorage(), func() {}
 }
 
-func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler {
+func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger, authManager *auth.Manager) http.Handler {
 	router := chi.NewRouter()
 
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -88,8 +89,9 @@ func newRouter(handlers *handler.Handler, sugar *zap.SugaredLogger) http.Handler
 	router.Post("/", handlers.ShortenURL)
 	router.Post("/api/shorten", handlers.ShortenURLJSON)
 	router.Post("/api/shorten/batch", handlers.ShortenURLBatch)
+	router.Get("/api/user/urls", handlers.GetUserURLs)
 	router.Get("/ping", handlers.PingDB)
 	router.Get("/{id}", handlers.GetURL)
 
-	return middleware.WithLogging(middleware.WithGzip(router), sugar)
+	return middleware.WithLogging(middleware.WithGzip(authManager.WithAuth(router)), sugar)
 }

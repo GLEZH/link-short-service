@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
@@ -17,6 +18,7 @@ type URLStorage interface {
 	Save(ctx context.Context, url entity.URL) (entity.URL, error)
 	SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error)
 	Get(ctx context.Context, id string) (entity.URL, error)
+	GetByUserID(ctx context.Context, userID string) ([]entity.URL, error)
 }
 
 type Database interface {
@@ -46,6 +48,11 @@ type shortenBatchRequest struct {
 type shortenBatchResponse struct {
 	CorrelationID string `json:"correlation_id"`
 	ShortURL      string `json:"short_url"`
+}
+
+type userURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
 }
 
 func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database) *Handler {
@@ -118,13 +125,19 @@ func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	urls := make([]entity.URL, 0, len(request))
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
 	for _, item := range request {
 		originalURL := strings.TrimSpace(item.OriginalURL)
 		if originalURL == "" {
 			h.writeError(w, entity.NewInvalidURLError())
 			return
 		}
-		urls = append(urls, entity.URL{OriginalURL: originalURL})
+		urls = append(urls, entity.URL{OriginalURL: originalURL, UserID: userID})
 	}
 
 	savedURLs, err := h.storage.SaveBatch(r.Context(), urls)
@@ -143,6 +156,36 @@ func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	urls, err := h.storage.GetByUserID(r.Context(), userID)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	if len(urls) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	response := make([]userURLResponse, 0, len(urls))
+	for _, url := range urls {
+		response = append(response, userURLResponse{
+			ShortURL:    h.baseURL + "/" + url.ID,
+			OriginalURL: url.OriginalURL,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(response)
 }
 
@@ -186,7 +229,12 @@ func (h *Handler) createShortURL(ctx context.Context, originalURL string) (strin
 		return "", entity.NewInvalidURLError()
 	}
 
-	shortURL, err := h.storage.Save(ctx, entity.URL{OriginalURL: originalURL})
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return "", entity.NewUserIDNotFoundError()
+	}
+
+	shortURL, err := h.storage.Save(ctx, entity.URL{OriginalURL: originalURL, UserID: userID})
 	if err != nil {
 		var alreadyExists *entity.URLAlreadyExistsError
 		if errors.As(err, &alreadyExists) {
@@ -204,6 +252,8 @@ func (h *Handler) writeError(w http.ResponseWriter, err error) {
 		w.WriteHeader(http.StatusBadRequest)
 	case errors.Is(err, entity.ErrURLNotFound):
 		w.WriteHeader(http.StatusBadRequest)
+	case errors.Is(err, entity.ErrUserIDNotFound):
+		w.WriteHeader(http.StatusUnauthorized)
 	default:
 		if h.log != nil {
 			h.log.Infow("internal handler error", "error", err)

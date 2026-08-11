@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
 	"go.uber.org/zap"
@@ -33,7 +34,7 @@ func newTestRouter(t *testing.T) http.Handler {
 		t.Fatalf("repository.New() error = %v", err)
 	}
 	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), testDatabase{})
-	return newRouter(handlers, zap.NewNop().Sugar())
+	return newRouter(handlers, zap.NewNop().Sugar(), auth.NewManager("test-secret"))
 }
 
 func newTestRouterWithDatabase(t *testing.T, db handler.Database) http.Handler {
@@ -44,7 +45,7 @@ func newTestRouterWithDatabase(t *testing.T, db handler.Database) http.Handler {
 		t.Fatalf("repository.New() error = %v", err)
 	}
 	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), db)
-	return newRouter(handlers, zap.NewNop().Sugar())
+	return newRouter(handlers, zap.NewNop().Sugar(), auth.NewManager("test-secret"))
 }
 
 func TestRouter(t *testing.T) {
@@ -425,6 +426,87 @@ func TestRouter(t *testing.T) {
 
 		if recorder.Code != http.StatusInternalServerError {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("user urls without shortened urls is no content", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		recorder := httptest.NewRecorder()
+
+		newTestRouter(t).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusNoContent {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusNoContent)
+		}
+
+		if cookie := recorder.Result().Cookies(); len(cookie) == 0 {
+			t.Fatal("auth cookie is missing")
+		}
+	})
+
+	t.Run("user urls returns shortened urls", func(t *testing.T) {
+		router := newTestRouter(t)
+
+		firstRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://first.example.com"))
+		firstRecorder := httptest.NewRecorder()
+		router.ServeHTTP(firstRecorder, firstRequest)
+
+		if firstRecorder.Code != http.StatusCreated {
+			t.Fatalf("first status code = %d, want %d", firstRecorder.Code, http.StatusCreated)
+		}
+		cookies := firstRecorder.Result().Cookies()
+		if len(cookies) == 0 {
+			t.Fatal("auth cookie is missing")
+		}
+
+		secondRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://second.example.com"))
+		secondRequest.AddCookie(cookies[0])
+		secondRecorder := httptest.NewRecorder()
+		router.ServeHTTP(secondRecorder, secondRequest)
+
+		if secondRecorder.Code != http.StatusCreated {
+			t.Fatalf("second status code = %d, want %d", secondRecorder.Code, http.StatusCreated)
+		}
+
+		listRequest := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		listRequest.AddCookie(cookies[0])
+		listRecorder := httptest.NewRecorder()
+		router.ServeHTTP(listRecorder, listRequest)
+
+		if listRecorder.Code != http.StatusOK {
+			t.Fatalf("list status code = %d, want %d", listRecorder.Code, http.StatusOK)
+		}
+
+		var response []struct {
+			ShortURL    string `json:"short_url"`
+			OriginalURL string `json:"original_url"`
+		}
+		if err := json.NewDecoder(listRecorder.Result().Body).Decode(&response); err != nil {
+			t.Fatalf("json decode error = %v", err)
+		}
+		if len(response) != 2 {
+			t.Fatalf("response length = %d, want 2", len(response))
+		}
+		if response[0].OriginalURL != "http://first.example.com" || response[1].OriginalURL != "http://second.example.com" {
+			t.Fatalf("response = %+v, want user urls", response)
+		}
+	})
+
+	t.Run("user urls with cookie without user id is unauthorized", func(t *testing.T) {
+		authManager := auth.NewManager("test-secret")
+		token, err := authManager.BuildToken("")
+		if err != nil {
+			t.Fatalf("BuildToken() error = %v", err)
+		}
+
+		request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		request.AddCookie(&http.Cookie{Name: auth.CookieName, Value: token})
+		recorder := httptest.NewRecorder()
+
+		newTestRouter(t).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusUnauthorized)
 		}
 	})
 

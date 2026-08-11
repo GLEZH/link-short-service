@@ -9,6 +9,7 @@ var (
 	ErrInvalidURL       = errors.New("invalid url")
 	ErrURLNotFound      = errors.New("url not found")
 	ErrURLAlreadyExists = errors.New("url already exists")
+	ErrUserIDNotFound   = errors.New("user id not found")
 )
 
 type DomainError struct {
@@ -80,5 +81,19 @@ func NewURLAlreadyExistsError(url URL) *URLAlreadyExistsError {
 			ErrURLAlreadyExists,
 		),
 		URL: url,
+	}
+}
+
+type UserIDNotFoundError struct {
+	DomainError
+}
+
+func NewUserIDNotFoundError() *UserIDNotFoundError {
+	return &UserIDNotFoundError{
+		DomainError: NewDomainError(
+			ErrUserIDNotFound.Error(),
+			"user.id_not_found",
+			ErrUserIDNotFound,
+		),
 	}
 }
