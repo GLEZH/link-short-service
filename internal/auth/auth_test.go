@@ -4,15 +4,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"testing"
 	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/google/uuid"
 )
-
-var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 func TestManager_BuildAndParseToken(t *testing.T) {
 	manager := NewManager("test-secret")
@@ -57,9 +55,7 @@ func TestNewUserID(t *testing.T) {
 		t.Fatalf("newUserID() error = %v", err)
 	}
 
-	if !uuidV4Pattern.MatchString(userID) {
-		t.Fatalf("userID = %q, want uuid v4", userID)
-	}
+	assertUUIDV4(t, userID)
 }
 
 func TestManager_WithAuth(t *testing.T) {
@@ -73,9 +69,7 @@ func TestManager_WithAuth(t *testing.T) {
 			if userID == "" {
 				t.Fatal("user id is empty")
 			}
-			if !uuidV4Pattern.MatchString(userID) {
-				t.Fatalf("userID = %q, want uuid v4", userID)
-			}
+			assertUUIDV4(t, userID)
 		}))
 
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -113,4 +107,16 @@ func TestManager_WithAuth(t *testing.T) {
 			t.Fatalf("cookies count = %d, want 0", len(recorder.Result().Cookies()))
 		}
 	})
+}
+
+func assertUUIDV4(t *testing.T, value string) {
+	t.Helper()
+
+	userID, err := uuid.Parse(value)
+	if err != nil {
+		t.Fatalf("uuid.Parse(%q) error = %v", value, err)
+	}
+	if userID.Version() != 4 {
+		t.Fatalf("uuid version = %d, want 4", userID.Version())
+	}
 }
