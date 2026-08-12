@@ -17,6 +17,7 @@ type record struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id"`
+	IsDeleted   bool   `json:"is_deleted"`
 }
 
 type FileURLStorage struct {
@@ -42,7 +43,7 @@ func NewFileURLStorage(filePath string, storage *URLStorage) (*FileURLStorage, e
 	}
 
 	for _, rec := range records {
-		storage.restore(entity.URL{ID: rec.ShortURL, OriginalURL: rec.OriginalURL, UserID: rec.UserID})
+		storage.restore(entity.URL{ID: rec.ShortURL, OriginalURL: rec.OriginalURL, UserID: rec.UserID, IsDeleted: rec.IsDeleted})
 	}
 	fileStorage.records = records
 
@@ -67,6 +68,7 @@ func (s *FileURLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, 
 		ShortURL:    savedURL.ID,
 		OriginalURL: savedURL.OriginalURL,
 		UserID:      savedURL.UserID,
+		IsDeleted:   savedURL.IsDeleted,
 	})
 
 	if err := writeRecords(s.filePath, s.records); err != nil {
@@ -95,6 +97,7 @@ func (s *FileURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]en
 			ShortURL:    savedURL.ID,
 			OriginalURL: savedURL.OriginalURL,
 			UserID:      savedURL.UserID,
+			IsDeleted:   savedURL.IsDeleted,
 		})
 	}
 
@@ -103,6 +106,38 @@ func (s *FileURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]en
 	}
 
 	return savedURLs, nil
+}
+
+func (s *FileURLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
+	if err := s.URLStorage.DeleteBatch(ctx, userID, ids); err != nil {
+		return err
+	}
+
+	if s.filePath == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	deletedIDs := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		deletedIDs[id] = struct{}{}
+	}
+	for i := range s.records {
+		if s.records[i].UserID != userID {
+			continue
+		}
+		if _, ok := deletedIDs[s.records[i].ShortURL]; ok {
+			s.records[i].IsDeleted = true
+		}
+	}
+
+	if err := writeRecords(s.filePath, s.records); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *FileURLStorage) Close() error {

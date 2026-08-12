@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/jackc/pgerrcode"
@@ -87,11 +88,13 @@ func (s *DatabaseURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) (
 
 func (s *DatabaseURLStorage) getByOriginalURL(ctx context.Context, originalURL string) (entity.URL, error) {
 	var id int64
+	var userID string
+	var isDeleted bool
 	err := s.db.QueryRowContext(
 		ctx,
-		"SELECT id FROM shortened_urls WHERE original_url = $1",
+		"SELECT id, user_id, is_deleted FROM shortened_urls WHERE original_url = $1",
 		originalURL,
-	).Scan(&id)
+	).Scan(&id, &userID, &isDeleted)
 	if err != nil {
 		return entity.URL{}, fmt.Errorf("get url by original url: %w", err)
 	}
@@ -99,6 +102,8 @@ func (s *DatabaseURLStorage) getByOriginalURL(ctx context.Context, originalURL s
 	return entity.URL{
 		ID:          strconv.FormatInt(id, 10),
 		OriginalURL: originalURL,
+		UserID:      userID,
+		IsDeleted:   isDeleted,
 	}, nil
 }
 
@@ -119,14 +124,17 @@ func (s *DatabaseURLStorage) Get(ctx context.Context, id string) (entity.URL, er
 	url := entity.URL{ID: id}
 	err = s.db.QueryRowContext(
 		ctx,
-		"SELECT original_url FROM shortened_urls WHERE id = $1",
+		"SELECT original_url, is_deleted FROM shortened_urls WHERE id = $1",
 		urlID,
-	).Scan(&url.OriginalURL)
+	).Scan(&url.OriginalURL, &url.IsDeleted)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return entity.URL{}, entity.NewURLNotFoundError(id)
 		}
 		return entity.URL{}, fmt.Errorf("get url: %w", err)
+	}
+	if url.IsDeleted {
+		return entity.URL{}, entity.NewURLDeletedError(id)
 	}
 
 	return url, nil
@@ -161,4 +169,44 @@ func (s *DatabaseURLStorage) GetByUserID(ctx context.Context, userID string) ([]
 	}
 
 	return urls, nil
+}
+
+func (s *DatabaseURLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
+	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
+	defer cancel()
+
+	query, args := buildDeleteBatchQuery(userID, ids)
+	if query == "" {
+		return nil
+	}
+
+	if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("delete batch urls: %w", err)
+	}
+
+	return nil
+}
+
+func buildDeleteBatchQuery(userID string, ids []string) (string, []any) {
+	args := []any{userID}
+	placeholders := make([]string, 0, len(ids))
+
+	for _, id := range ids {
+		urlID, err := strconv.ParseInt(id, 10, 64)
+		if err != nil {
+			continue
+		}
+		args = append(args, urlID)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+	if len(placeholders) == 0 {
+		return "", nil
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE shortened_urls SET is_deleted = TRUE WHERE user_id = $1 AND id IN (%s)",
+		strings.Join(placeholders, ","),
+	)
+
+	return query, args
 }

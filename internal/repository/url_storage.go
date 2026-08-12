@@ -73,6 +73,9 @@ func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	if !ok {
 		return entity.URL{}, entity.NewURLNotFoundError(id)
 	}
+	if url.IsDeleted {
+		return entity.URL{}, entity.NewURLDeletedError(id)
+	}
 
 	return url, nil
 }
@@ -97,6 +100,22 @@ func (s *URLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.U
 	})
 
 	return urls, nil
+}
+
+func (s *URLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, id := range ids {
+		url, ok := s.urls[id]
+		if !ok || url.UserID != userID {
+			continue
+		}
+		url.IsDeleted = true
+		s.urls[id] = url
+	}
+
+	return nil
 }
 
 func (s *URLStorage) restore(url entity.URL) {

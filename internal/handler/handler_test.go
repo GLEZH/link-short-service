@@ -33,6 +33,10 @@ func (s brokenStorage) GetByUserID(ctx context.Context, userID string) ([]entity
 	return nil, errors.New("get by user failed")
 }
 
+func (s brokenStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
+	return errors.New("delete batch failed")
+}
+
 func TestShortenURL_InternalError(t *testing.T) {
 	core, logs := observer.New(zapcore.InfoLevel)
 	handlers := New("http://localhost:8080", brokenStorage{}, zap.New(core).Sugar(), nil)

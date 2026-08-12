@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
@@ -510,6 +511,37 @@ func TestRouter(t *testing.T) {
 		}
 	})
 
+	t.Run("delete user urls returns accepted and get is gone", func(t *testing.T) {
+		router := newTestRouter(t)
+		originalURL := "http://delete.example.com"
+
+		shortenRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		shortenRecorder := httptest.NewRecorder()
+		router.ServeHTTP(shortenRecorder, shortenRequest)
+
+		if shortenRecorder.Code != http.StatusCreated {
+			t.Fatalf("shorten status code = %d, want %d", shortenRecorder.Code, http.StatusCreated)
+		}
+		cookies := shortenRecorder.Result().Cookies()
+		if len(cookies) == 0 {
+			t.Fatal("auth cookie is missing")
+		}
+
+		shortURL := shortenRecorder.Body.String()
+		shortID := strings.TrimPrefix(shortURL, "http://localhost:8080/")
+		deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(`["`+shortID+`"]`))
+		deleteRequest.Header.Set("Content-Type", "application/json")
+		deleteRequest.AddCookie(cookies[0])
+		deleteRecorder := httptest.NewRecorder()
+		router.ServeHTTP(deleteRecorder, deleteRequest)
+
+		if deleteRecorder.Code != http.StatusAccepted {
+			t.Fatalf("delete status code = %d, want %d", deleteRecorder.Code, http.StatusAccepted)
+		}
+
+		waitForStatus(t, router, http.MethodGet, "/"+shortID, http.StatusGone)
+	})
+
 	t.Run("get root is bad request", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		recorder := httptest.NewRecorder()
@@ -542,6 +574,25 @@ func TestRouter(t *testing.T) {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
 		}
 	})
+}
+
+func waitForStatus(t *testing.T, handler http.Handler, method string, path string, wantCode int) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	var gotCode int
+	for time.Now().Before(deadline) {
+		request := httptest.NewRequest(method, path, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		gotCode = recorder.Code
+		if gotCode == wantCode {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("status code = %d, want %d", gotCode, wantCode)
 }
 
 func gzipBody(t *testing.T, body string) *bytes.Buffer {

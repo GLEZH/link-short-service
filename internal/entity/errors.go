@@ -9,6 +9,7 @@ var (
 	ErrInvalidURL       = errors.New("invalid url")
 	ErrURLNotFound      = errors.New("url not found")
 	ErrURLAlreadyExists = errors.New("url already exists")
+	ErrURLDeleted       = errors.New("url deleted")
 	ErrUserIDNotFound   = errors.New("user id not found")
 )
 
@@ -81,6 +82,22 @@ func NewURLAlreadyExistsError(url URL) *URLAlreadyExistsError {
 			ErrURLAlreadyExists,
 		),
 		URL: url,
+	}
+}
+
+type URLDeletedError struct {
+	DomainError
+	ID string
+}
+
+func NewURLDeletedError(id string) *URLDeletedError {
+	return &URLDeletedError{
+		DomainError: NewDomainError(
+			fmt.Sprintf("%v: id %s", ErrURLDeleted, id),
+			"url.deleted",
+			ErrURLDeleted,
+		),
+		ID: id,
 	}
 }
 

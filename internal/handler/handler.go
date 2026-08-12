@@ -19,6 +19,7 @@ type URLStorage interface {
 	SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error)
 	Get(ctx context.Context, id string) (entity.URL, error)
 	GetByUserID(ctx context.Context, userID string) ([]entity.URL, error)
+	DeleteBatch(ctx context.Context, userID string, ids []string) error
 }
 
 type Database interface {
@@ -30,6 +31,7 @@ type Handler struct {
 	storage URLStorage
 	log     *zap.SugaredLogger
 	db      Database
+	deletes chan deleteRequest
 }
 
 type shortenRequest struct {
@@ -55,13 +57,22 @@ type userURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
+type deleteRequest struct {
+	userID string
+	urlID  string
+}
+
 func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database) *Handler {
-	return &Handler{
+	h := &Handler{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		storage: storage,
 		log:     log,
 		db:      db,
+		deletes: make(chan deleteRequest, deleteQueueSize),
 	}
+	go h.runDeleteWorker(context.Background())
+
+	return h
 }
 
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
@@ -189,6 +200,28 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if len(ids) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	h.enqueueDeleteURLs(userID, ids)
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -246,12 +279,62 @@ func (h *Handler) createShortURL(ctx context.Context, originalURL string) (strin
 	return h.baseURL + "/" + shortURL.ID, nil
 }
 
+func (h *Handler) enqueueDeleteURLs(userID string, ids []string) {
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		h.deletes <- deleteRequest{userID: userID, urlID: id}
+	}
+}
+
+func (h *Handler) runDeleteWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case req := <-h.deletes:
+			h.deleteBatch(ctx, h.fanInDeleteBatch(req))
+		}
+	}
+}
+
+func (h *Handler) fanInDeleteBatch(first deleteRequest) []deleteRequest {
+	batch := []deleteRequest{first}
+	for len(batch) < deleteBatchSize {
+		select {
+		case req := <-h.deletes:
+			batch = append(batch, req)
+		default:
+			return batch
+		}
+	}
+
+	return batch
+}
+
+func (h *Handler) deleteBatch(ctx context.Context, batch []deleteRequest) {
+	idsByUser := make(map[string][]string)
+	for _, req := range batch {
+		idsByUser[req.userID] = append(idsByUser[req.userID], req.urlID)
+	}
+
+	for userID, ids := range idsByUser {
+		if err := h.storage.DeleteBatch(ctx, userID, ids); err != nil && h.log != nil {
+			h.log.Infow("delete user urls failed", "error", err)
+		}
+	}
+}
+
 func (h *Handler) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, entity.ErrInvalidURL):
 		w.WriteHeader(http.StatusBadRequest)
 	case errors.Is(err, entity.ErrURLNotFound):
 		w.WriteHeader(http.StatusBadRequest)
+	case errors.Is(err, entity.ErrURLDeleted):
+		w.WriteHeader(http.StatusGone)
 	case errors.Is(err, entity.ErrUserIDNotFound):
 		w.WriteHeader(http.StatusUnauthorized)
 	default:
