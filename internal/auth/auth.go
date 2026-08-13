@@ -35,23 +35,11 @@ func (m *Manager) WithAuth(next http.Handler) http.Handler {
 		switch {
 		case err == nil:
 		case errors.Is(err, entity.ErrUserIDNotFound):
-		case errors.Is(err, http.ErrNoCookie):
-			userID, err = newUserID()
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		case errors.Is(err, http.ErrNoCookie) || err != nil:
+			userID, err = m.setNewUserCookie(w)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			if err = m.setCookie(w, userID); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-		default:
-			userID, err = newUserID()
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			if err = m.setCookie(w, userID); err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -59,6 +47,18 @@ func (m *Manager) WithAuth(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(WithUserID(r.Context(), userID)))
 	})
+}
+
+func (m *Manager) setNewUserCookie(w http.ResponseWriter) (string, error) {
+	userID, err := newUserID()
+	if err != nil {
+		return "", err
+	}
+	if err = m.setCookie(w, userID); err != nil {
+		return "", err
+	}
+
+	return userID, nil
 }
 
 func (m *Manager) userIDFromRequest(r *http.Request) (string, error) {

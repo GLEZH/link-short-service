@@ -217,7 +217,7 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.enqueueDeleteURLs(userID, ids)
+	go h.enqueueDeleteURLs(userID, ids)
 
 	w.WriteHeader(http.StatusAccepted)
 }

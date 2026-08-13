@@ -84,20 +84,34 @@ func (s *URLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.U
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	urls := make([]entity.URL, 0)
+	type sortableURL struct {
+		url       entity.URL
+		numericID int
+		parsedID  bool
+	}
+
+	items := make([]sortableURL, 0)
 	for _, url := range s.urls {
 		if url.UserID == userID {
-			urls = append(urls, url)
+			id, err := strconv.Atoi(url.ID)
+			items = append(items, sortableURL{
+				url:       url,
+				numericID: id,
+				parsedID:  err == nil,
+			})
 		}
 	}
-	sort.Slice(urls, func(i, j int) bool {
-		leftID, leftErr := strconv.Atoi(urls[i].ID)
-		rightID, rightErr := strconv.Atoi(urls[j].ID)
-		if leftErr != nil || rightErr != nil {
-			return urls[i].ID < urls[j].ID
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].parsedID || !items[j].parsedID {
+			return items[i].url.ID < items[j].url.ID
 		}
-		return leftID < rightID
+		return items[i].numericID < items[j].numericID
 	})
+
+	urls := make([]entity.URL, 0, len(items))
+	for _, item := range items {
+		urls = append(urls, item.url)
+	}
 
 	return urls, nil
 }
