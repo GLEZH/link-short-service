@@ -56,7 +56,7 @@ func TestURLStorage_Persistence(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	savedURL, err := storage.Save(ctx, entity.URL{OriginalURL: originalURL})
+	savedURL, err := storage.Save(ctx, entity.URL{OriginalURL: originalURL, UserID: "user-id"})
 	if err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -90,6 +90,13 @@ func TestURLStorage_Persistence(t *testing.T) {
 		t.Errorf("OriginalURL = %q, want %q", records[0].OriginalURL, originalURL)
 	}
 
+	if records[0].UserID != "user-id" {
+		t.Errorf("UserID = %q, want %q", records[0].UserID, "user-id")
+	}
+	if records[0].IsDeleted {
+		t.Error("IsDeleted = true, want false")
+	}
+
 	restored, err := New(filePath)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -108,6 +115,111 @@ func TestURLStorage_Persistence(t *testing.T) {
 	}
 }
 
+func TestURLStorage_DeleteBatch(t *testing.T) {
+	ctx := context.Background()
+	storage, err := New("")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ownerURL, err := storage.Save(ctx, entity.URL{OriginalURL: "http://owner.example.com", UserID: "owner"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	otherURL, err := storage.Save(ctx, entity.URL{OriginalURL: "http://other.example.com", UserID: "other"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if err = storage.DeleteBatch(ctx, "owner", []string{ownerURL.ID, otherURL.ID}); err != nil {
+		t.Fatalf("DeleteBatch() error = %v", err)
+	}
+
+	_, err = storage.Get(ctx, ownerURL.ID)
+	if !errors.Is(err, entity.ErrURLDeleted) {
+		t.Fatalf("Get() error = %v, want %v", err, entity.ErrURLDeleted)
+	}
+
+	gotURL, err := storage.Get(ctx, otherURL.ID)
+	if err != nil {
+		t.Fatalf("Get() other url error = %v", err)
+	}
+	if gotURL.OriginalURL != otherURL.OriginalURL {
+		t.Errorf("OriginalURL = %q, want %q", gotURL.OriginalURL, otherURL.OriginalURL)
+	}
+}
+
+func TestURLStorage_DeleteBatchPersistence(t *testing.T) {
+	ctx := context.Background()
+	filePath := filepath.Join(t.TempDir(), "short-url-db.json")
+	storage, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	savedURL, err := storage.Save(ctx, entity.URL{OriginalURL: "http://deleted.example.com", UserID: "user-id"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err = storage.DeleteBatch(ctx, "user-id", []string{savedURL.ID}); err != nil {
+		t.Fatalf("DeleteBatch() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("os.ReadFile() error = %v", err)
+	}
+
+	var records []record
+	if err = json.Unmarshal(data, &records); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records count = %d, want 1", len(records))
+	}
+	if !records[0].IsDeleted {
+		t.Error("IsDeleted = false, want true")
+	}
+
+	restored, err := New(filePath)
+	if err != nil {
+		t.Fatalf("New() restored error = %v", err)
+	}
+	_, err = restored.Get(ctx, savedURL.ID)
+	if !errors.Is(err, entity.ErrURLDeleted) {
+		t.Fatalf("Get() error = %v, want %v", err, entity.ErrURLDeleted)
+	}
+}
+
+func TestURLStorage_GetByUserID(t *testing.T) {
+	ctx := context.Background()
+	storage, err := New("")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = storage.Save(ctx, entity.URL{OriginalURL: "http://first.example.com", UserID: "first-user"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	_, err = storage.Save(ctx, entity.URL{OriginalURL: "http://second.example.com", UserID: "second-user"})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	urls, err := storage.GetByUserID(ctx, "first-user")
+	if err != nil {
+		t.Fatalf("GetByUserID() error = %v", err)
+	}
+
+	if len(urls) != 1 {
+		t.Fatalf("urls count = %d, want 1", len(urls))
+	}
+	if urls[0].OriginalURL != "http://first.example.com" {
+		t.Errorf("OriginalURL = %q, want %q", urls[0].OriginalURL, "http://first.example.com")
+	}
+}
+
 func TestURLStorage_BatchPersistence(t *testing.T) {
 	ctx := context.Background()
 	filePath := filepath.Join(t.TempDir(), "short-url-db.json")
@@ -118,8 +230,8 @@ func TestURLStorage_BatchPersistence(t *testing.T) {
 	}
 
 	savedURLs, err := storage.SaveBatch(ctx, []entity.URL{
-		{OriginalURL: "http://yandex.ru"},
-		{OriginalURL: "http://practicum.yandex.ru"},
+		{OriginalURL: "http://yandex.ru", UserID: "user-id"},
+		{OriginalURL: "http://practicum.yandex.ru", UserID: "user-id"},
 	})
 	if err != nil {
 		t.Fatalf("SaveBatch() error = %v", err)

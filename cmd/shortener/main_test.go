@@ -11,7 +11,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/handler"
 	"github.com/GLEZH/linkshrtservice/internal/repository"
 	"go.uber.org/zap"
@@ -33,7 +35,7 @@ func newTestRouter(t *testing.T) http.Handler {
 		t.Fatalf("repository.New() error = %v", err)
 	}
 	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), testDatabase{})
-	return newRouter(handlers, zap.NewNop().Sugar())
+	return newRouter(handlers, zap.NewNop().Sugar(), auth.NewManager("test-secret"))
 }
 
 func newTestRouterWithDatabase(t *testing.T, db handler.Database) http.Handler {
@@ -44,7 +46,7 @@ func newTestRouterWithDatabase(t *testing.T, db handler.Database) http.Handler {
 		t.Fatalf("repository.New() error = %v", err)
 	}
 	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), db)
-	return newRouter(handlers, zap.NewNop().Sugar())
+	return newRouter(handlers, zap.NewNop().Sugar(), auth.NewManager("test-secret"))
 }
 
 func TestRouter(t *testing.T) {
@@ -428,6 +430,118 @@ func TestRouter(t *testing.T) {
 		}
 	})
 
+	t.Run("user urls without shortened urls is no content", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		recorder := httptest.NewRecorder()
+
+		newTestRouter(t).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusNoContent {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusNoContent)
+		}
+
+		if cookie := recorder.Result().Cookies(); len(cookie) == 0 {
+			t.Fatal("auth cookie is missing")
+		}
+	})
+
+	t.Run("user urls returns shortened urls", func(t *testing.T) {
+		router := newTestRouter(t)
+
+		firstRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://first.example.com"))
+		firstRecorder := httptest.NewRecorder()
+		router.ServeHTTP(firstRecorder, firstRequest)
+
+		if firstRecorder.Code != http.StatusCreated {
+			t.Fatalf("first status code = %d, want %d", firstRecorder.Code, http.StatusCreated)
+		}
+		cookies := firstRecorder.Result().Cookies()
+		if len(cookies) == 0 {
+			t.Fatal("auth cookie is missing")
+		}
+
+		secondRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://second.example.com"))
+		secondRequest.AddCookie(cookies[0])
+		secondRecorder := httptest.NewRecorder()
+		router.ServeHTTP(secondRecorder, secondRequest)
+
+		if secondRecorder.Code != http.StatusCreated {
+			t.Fatalf("second status code = %d, want %d", secondRecorder.Code, http.StatusCreated)
+		}
+
+		listRequest := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		listRequest.AddCookie(cookies[0])
+		listRecorder := httptest.NewRecorder()
+		router.ServeHTTP(listRecorder, listRequest)
+
+		if listRecorder.Code != http.StatusOK {
+			t.Fatalf("list status code = %d, want %d", listRecorder.Code, http.StatusOK)
+		}
+
+		var response []struct {
+			ShortURL    string `json:"short_url"`
+			OriginalURL string `json:"original_url"`
+		}
+		if err := json.NewDecoder(listRecorder.Result().Body).Decode(&response); err != nil {
+			t.Fatalf("json decode error = %v", err)
+		}
+		if len(response) != 2 {
+			t.Fatalf("response length = %d, want 2", len(response))
+		}
+		if response[0].OriginalURL != "http://first.example.com" || response[1].OriginalURL != "http://second.example.com" {
+			t.Fatalf("response = %+v, want user urls", response)
+		}
+	})
+
+	t.Run("user urls with cookie without user id is unauthorized", func(t *testing.T) {
+		authManager := auth.NewManager("test-secret")
+		token, err := authManager.BuildToken("")
+		if err != nil {
+			t.Fatalf("BuildToken() error = %v", err)
+		}
+
+		request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+		request.AddCookie(&http.Cookie{Name: auth.CookieName, Value: token})
+		recorder := httptest.NewRecorder()
+
+		newTestRouter(t).ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("delete user urls returns accepted and get is gone", func(t *testing.T) {
+		router := newTestRouter(t)
+		originalURL := "http://delete.example.com"
+
+		shortenRequest := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(originalURL))
+		shortenRecorder := httptest.NewRecorder()
+		router.ServeHTTP(shortenRecorder, shortenRequest)
+
+		if shortenRecorder.Code != http.StatusCreated {
+			t.Fatalf("shorten status code = %d, want %d", shortenRecorder.Code, http.StatusCreated)
+		}
+		cookies := shortenRecorder.Result().Cookies()
+		if len(cookies) == 0 {
+			t.Fatal("auth cookie is missing")
+		}
+
+		shortURL := shortenRecorder.Body.String()
+		shortID := strings.TrimPrefix(shortURL, "http://localhost:8080/")
+		deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(`["`+shortID+`"]`))
+		deleteRequest.Header.Set("Content-Type", "application/json")
+		deleteRequest.AddCookie(cookies[0])
+		deleteRecorder := httptest.NewRecorder()
+		router.ServeHTTP(deleteRecorder, deleteRequest)
+
+		if deleteRecorder.Code != http.StatusAccepted {
+			t.Fatalf("delete status code = %d, want %d", deleteRecorder.Code, http.StatusAccepted)
+		}
+
+		waitForStatus(t, router, http.MethodGet, "/"+shortID, http.StatusGone)
+	})
+
 	t.Run("get root is bad request", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		recorder := httptest.NewRecorder()
@@ -460,6 +574,25 @@ func TestRouter(t *testing.T) {
 			t.Errorf("status code = %d, want %d", recorder.Code, http.StatusBadRequest)
 		}
 	})
+}
+
+func waitForStatus(t *testing.T, handler http.Handler, method string, path string, wantCode int) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	var gotCode int
+	for time.Now().Before(deadline) {
+		request := httptest.NewRequest(method, path, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		gotCode = recorder.Code
+		if gotCode == wantCode {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("status code = %d, want %d", gotCode, wantCode)
 }
 
 func gzipBody(t *testing.T, body string) *bytes.Buffer {

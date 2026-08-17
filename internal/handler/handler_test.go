@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -28,11 +29,20 @@ func (s brokenStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	return entity.URL{}, errors.New("get failed")
 }
 
+func (s brokenStorage) GetByUserID(ctx context.Context, userID string) ([]entity.URL, error) {
+	return nil, errors.New("get by user failed")
+}
+
+func (s brokenStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
+	return errors.New("delete batch failed")
+}
+
 func TestShortenURL_InternalError(t *testing.T) {
 	core, logs := observer.New(zapcore.InfoLevel)
 	handlers := New("http://localhost:8080", brokenStorage{}, zap.New(core).Sugar(), nil)
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://example.com"))
+	request = request.WithContext(auth.WithUserID(request.Context(), "user-id"))
 	recorder := httptest.NewRecorder()
 
 	handlers.ShortenURL(recorder, request)

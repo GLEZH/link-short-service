@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -72,8 +73,63 @@ func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	if !ok {
 		return entity.URL{}, entity.NewURLNotFoundError(id)
 	}
+	if url.IsDeleted {
+		return entity.URL{}, entity.NewURLDeletedError(id)
+	}
 
 	return url, nil
+}
+
+func (s *URLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.URL, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	type sortableURL struct {
+		url       entity.URL
+		numericID int
+		parsedID  bool
+	}
+
+	items := make([]sortableURL, 0)
+	for _, url := range s.urls {
+		if url.UserID == userID {
+			id, err := strconv.Atoi(url.ID)
+			items = append(items, sortableURL{
+				url:       url,
+				numericID: id,
+				parsedID:  err == nil,
+			})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].parsedID || !items[j].parsedID {
+			return items[i].url.ID < items[j].url.ID
+		}
+		return items[i].numericID < items[j].numericID
+	})
+
+	urls := make([]entity.URL, 0, len(items))
+	for _, item := range items {
+		urls = append(urls, item.url)
+	}
+
+	return urls, nil
+}
+
+func (s *URLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, id := range ids {
+		url, ok := s.urls[id]
+		if !ok || url.UserID != userID {
+			continue
+		}
+		url.IsDeleted = true
+		s.urls[id] = url
+	}
+
+	return nil
 }
 
 func (s *URLStorage) restore(url entity.URL) {
