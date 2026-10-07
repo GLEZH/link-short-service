@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// URLStorage stores and retrieves shortened URLs
 type URLStorage interface {
 	Save(ctx context.Context, url entity.URL) (entity.URL, error)
 	SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error)
@@ -24,15 +25,17 @@ type URLStorage interface {
 	DeleteBatch(ctx context.Context, userID string, ids []string) error
 }
 
+// Database checks database availability
 type Database interface {
 	Ping(ctx context.Context) error
 }
 
-// Auditor получает события успешной обработки запросов.
+// Auditor receives successful request events
 type Auditor interface {
 	Notify(context.Context, audit.Event)
 }
 
+// Handler serves the URL shortener endpoints
 type Handler struct {
 	baseURL string
 	storage URLStorage
@@ -70,6 +73,7 @@ type deleteRequest struct {
 	urlID  string
 }
 
+// New creates a URL shortener handler
 func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database, auditors ...Auditor) *Handler {
 	h := &Handler{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -86,6 +90,7 @@ func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database
 	return h
 }
 
+// ShortenURL creates a short URL from a plain-text request
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -110,6 +115,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(shortURL))
 }
 
+// ShortenURLJSON creates a short URL from a JSON request
 func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 	var request shortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -134,6 +140,7 @@ func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
 }
 
+// ShortenURLBatch creates several short URLs
 func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 	var request []shortenBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -181,6 +188,7 @@ func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// GetUserURLs returns URLs created by the current user
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
@@ -211,6 +219,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// DeleteUserURLs schedules deletion of the current user's URLs
 func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
@@ -233,6 +242,7 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// GetURL redirects a short URL to its original address
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -251,6 +261,7 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 	h.notifyAudit(r.Context(), audit.ActionFollow, shortURL.OriginalURL)
 }
 
+// PingDB reports database availability
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
 		w.WriteHeader(http.StatusInternalServerError)

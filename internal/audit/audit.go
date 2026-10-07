@@ -12,13 +12,17 @@ import (
 	"go.uber.org/zap"
 )
 
+// Action identifies an audited operation
 type Action string
 
 const (
+	// ActionShorten records short URL creation
 	ActionShorten Action = "shorten"
-	ActionFollow  Action = "follow"
+	// ActionFollow records a short URL redirect
+	ActionFollow Action = "follow"
 )
 
+// Event describes one audit event
 type Event struct {
 	Timestamp int64  `json:"ts"`
 	Action    Action `json:"action"`
@@ -26,20 +30,24 @@ type Event struct {
 	URL       string `json:"url"`
 }
 
+// Observer receives audit events
 type Observer interface {
 	Notify(context.Context, Event) error
 }
 
+// Publisher sends events to subscribed observers
 type Publisher struct {
 	mu        sync.RWMutex
 	observers []Observer
 	log       *zap.SugaredLogger
 }
 
+// NewPublisher creates an audit event publisher
 func NewPublisher(log *zap.SugaredLogger) *Publisher {
 	return &Publisher{log: log}
 }
 
+// Subscribe adds an observer to the publisher
 func (p *Publisher) Subscribe(observer Observer) {
 	if observer == nil {
 		return
@@ -50,6 +58,7 @@ func (p *Publisher) Subscribe(observer Observer) {
 	p.observers = append(p.observers, observer)
 }
 
+// Notify sends an event to every observer
 func (p *Publisher) Notify(ctx context.Context, event Event) {
 	p.mu.RLock()
 	observers := append([]Observer(nil), p.observers...)
@@ -62,15 +71,18 @@ func (p *Publisher) Notify(ctx context.Context, event Event) {
 	}
 }
 
+// FileObserver appends audit events to a file
 type FileObserver struct {
 	filePath string
 	mu       sync.Mutex
 }
 
+// NewFileObserver creates a file audit observer
 func NewFileObserver(filePath string) *FileObserver {
 	return &FileObserver{filePath: filePath}
 }
 
+// Notify appends an event as one JSON line
 func (o *FileObserver) Notify(_ context.Context, event Event) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -88,11 +100,13 @@ func (o *FileObserver) Notify(_ context.Context, event Event) error {
 	return nil
 }
 
+// HTTPObserver posts audit events to a remote server
 type HTTPObserver struct {
 	url    string
 	client *http.Client
 }
 
+// NewHTTPObserver creates a remote audit observer
 func NewHTTPObserver(url string, client *http.Client) *HTTPObserver {
 	if client == nil {
 		client = http.DefaultClient
@@ -100,6 +114,7 @@ func NewHTTPObserver(url string, client *http.Client) *HTTPObserver {
 	return &HTTPObserver{url: url, client: client}
 }
 
+// Notify posts an event in JSON format
 func (o *HTTPObserver) Notify(ctx context.Context, event Event) error {
 	body, err := json.Marshal(event)
 	if err != nil {

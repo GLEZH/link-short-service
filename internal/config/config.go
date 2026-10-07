@@ -6,6 +6,7 @@ import (
 	env "github.com/caarlos0/env/v11"
 )
 
+// Config contains the service settings
 type Config struct {
 	ServerAddress   string `env:"SERVER_ADDRESS"`
 	BaseURL         string `env:"BASE_URL"`
@@ -16,6 +17,7 @@ type Config struct {
 	AuditURL        string `env:"AUDIT_URL"`
 }
 
+// New parses settings from command-line arguments and the environment
 func New(args []string) (*Config, error) {
 	cfg := &Config{}
 

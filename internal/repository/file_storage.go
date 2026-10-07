@@ -20,6 +20,7 @@ type record struct {
 	IsDeleted   bool   `json:"is_deleted"`
 }
 
+// FileURLStorage persists in-memory URL storage to a file
 type FileURLStorage struct {
 	*URLStorage
 	mu       sync.Mutex
@@ -27,6 +28,7 @@ type FileURLStorage struct {
 	records  []record
 }
 
+// NewFileURLStorage creates storage backed by a JSON file
 func NewFileURLStorage(filePath string, storage *URLStorage) (*FileURLStorage, error) {
 	fileStorage := &FileURLStorage{
 		URLStorage: storage,
@@ -50,6 +52,7 @@ func NewFileURLStorage(filePath string, storage *URLStorage) (*FileURLStorage, e
 	return fileStorage, nil
 }
 
+// Save stores one URL and persists the change
 func (s *FileURLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, error) {
 	savedURL, err := s.URLStorage.Save(ctx, url)
 	if err != nil {
@@ -78,6 +81,7 @@ func (s *FileURLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, 
 	return savedURL, nil
 }
 
+// SaveBatch stores several URLs and persists the change
 func (s *FileURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error) {
 	savedURLs, err := s.URLStorage.SaveBatch(ctx, urls)
 	if err != nil {
@@ -108,6 +112,7 @@ func (s *FileURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]en
 	return savedURLs, nil
 }
 
+// DeleteBatch marks URLs as deleted and persists the change
 func (s *FileURLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
 	if err := s.URLStorage.DeleteBatch(ctx, userID, ids); err != nil {
 		return err
@@ -140,6 +145,7 @@ func (s *FileURLStorage) DeleteBatch(ctx context.Context, userID string, ids []s
 	return nil
 }
 
+// Close releases storage resources
 func (s *FileURLStorage) Close() error {
 	return nil
 }

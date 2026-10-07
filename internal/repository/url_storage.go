@@ -11,6 +11,7 @@ import (
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 )
 
+// URLStorage stores shortened URLs in memory
 type URLStorage struct {
 	mu            sync.RWMutex
 	nextID        int
@@ -18,6 +19,7 @@ type URLStorage struct {
 	originalIndex map[string]string
 }
 
+// NewURLStorage creates an empty in-memory storage
 func NewURLStorage() *URLStorage {
 	return &URLStorage{
 		urls:          make(map[string]entity.URL),
@@ -25,10 +27,12 @@ func NewURLStorage() *URLStorage {
 	}
 }
 
+// New creates a file-backed URL storage
 func New(filePath string) (*FileURLStorage, error) {
 	return NewFileURLStorage(filePath, NewURLStorage())
 }
 
+// Save stores one URL
 func (s *URLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -41,6 +45,7 @@ func (s *URLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, erro
 	return s.saveLocked(url), nil
 }
 
+// SaveBatch stores several URLs
 func (s *URLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,6 +72,7 @@ func (s *URLStorage) saveLocked(url entity.URL) entity.URL {
 	return url
 }
 
+// Get returns a URL by its short ID
 func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -82,6 +88,7 @@ func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	return url, nil
 }
 
+// GetByUserID returns URLs owned by a user
 func (s *URLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.URL, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -114,6 +121,7 @@ func compareURLIDs(a, b entity.URL) int {
 	return cmp.Compare(aID, bID)
 }
 
+// DeleteBatch marks a user's URLs as deleted
 func (s *URLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
