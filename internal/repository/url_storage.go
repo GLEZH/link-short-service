@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/GLEZH/linkshrtservice/internal/entity"
@@ -84,36 +86,32 @@ func (s *URLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.U
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	type sortableURL struct {
-		url       entity.URL
-		numericID int
-		parsedID  bool
-	}
-
-	items := make([]sortableURL, 0)
+	count := 0
 	for _, url := range s.urls {
 		if url.UserID == userID {
-			id, err := strconv.Atoi(url.ID)
-			items = append(items, sortableURL{
-				url:       url,
-				numericID: id,
-				parsedID:  err == nil,
-			})
+			count++
 		}
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].parsedID || !items[j].parsedID {
-			return items[i].url.ID < items[j].url.ID
-		}
-		return items[i].numericID < items[j].numericID
-	})
 
-	urls := make([]entity.URL, 0, len(items))
-	for _, item := range items {
-		urls = append(urls, item.url)
+	urls := make([]entity.URL, 0, count)
+	for _, url := range s.urls {
+		if url.UserID == userID {
+			urls = append(urls, url)
+		}
 	}
+
+	slices.SortFunc(urls, compareURLIDs)
 
 	return urls, nil
+}
+
+func compareURLIDs(a, b entity.URL) int {
+	aID, aErr := strconv.Atoi(a.ID)
+	bID, bErr := strconv.Atoi(b.ID)
+	if aErr != nil || bErr != nil {
+		return strings.Compare(a.ID, b.ID)
+	}
+	return cmp.Compare(aID, bID)
 }
 
 func (s *URLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
