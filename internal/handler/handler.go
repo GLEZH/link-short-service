@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/GLEZH/linkshrtservice/internal/audit"
 	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/go-chi/chi/v5"
@@ -26,12 +28,18 @@ type Database interface {
 	Ping(ctx context.Context) error
 }
 
+// Auditor получает события успешной обработки запросов.
+type Auditor interface {
+	Notify(context.Context, audit.Event)
+}
+
 type Handler struct {
 	baseURL string
 	storage URLStorage
 	log     *zap.SugaredLogger
 	db      Database
 	deletes chan deleteRequest
+	auditor Auditor
 }
 
 type shortenRequest struct {
@@ -62,13 +70,16 @@ type deleteRequest struct {
 	urlID  string
 }
 
-func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database) *Handler {
+func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database, auditors ...Auditor) *Handler {
 	h := &Handler{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		storage: storage,
 		log:     log,
 		db:      db,
 		deletes: make(chan deleteRequest, deleteQueueSize),
+	}
+	if len(auditors) > 0 {
+		h.auditor = auditors[0]
 	}
 	go h.runDeleteWorker(context.Background())
 
@@ -237,6 +248,7 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", shortURL.OriginalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+	h.notifyAudit(r.Context(), audit.ActionFollow, shortURL.OriginalURL)
 }
 
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
@@ -275,8 +287,23 @@ func (h *Handler) createShortURL(ctx context.Context, originalURL string) (strin
 		}
 		return "", err
 	}
+	h.notifyAudit(ctx, audit.ActionShorten, originalURL)
 
 	return h.baseURL + "/" + shortURL.ID, nil
+}
+
+func (h *Handler) notifyAudit(ctx context.Context, action audit.Action, originalURL string) {
+	if h.auditor == nil {
+		return
+	}
+
+	userID, _ := auth.UserIDFromContext(ctx)
+	h.auditor.Notify(ctx, audit.Event{
+		Timestamp: time.Now().Unix(),
+		Action:    action,
+		UserID:    userID,
+		URL:       originalURL,
+	})
 }
 
 func (h *Handler) enqueueDeleteURLs(userID string, ids []string) {

@@ -12,6 +12,8 @@ type Config struct {
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
 	DatabaseDSN     string `env:"DATABASE_DSN"`
 	AuthSecret      string `env:"AUTH_SECRET"`
+	AuditFile       string `env:"AUDIT_FILE"`
+	AuditURL        string `env:"AUDIT_URL"`
 }
 
 func New(args []string) (*Config, error) {
@@ -23,6 +25,8 @@ func New(args []string) (*Config, error) {
 	flags.StringVar(&cfg.FileStoragePath, "f", "", "path to file storage")
 	flags.StringVar(&cfg.DatabaseDSN, "d", "", "database connection string")
 	flags.StringVar(&cfg.AuthSecret, "auth-secret", "shortener-auth-secret", "auth secret")
+	flags.StringVar(&cfg.AuditFile, "audit-file", "", "path to audit log file")
+	flags.StringVar(&cfg.AuditURL, "audit-url", "", "audit server URL")
 
 	if err := flags.Parse(args); err != nil {
 		return nil, err
