@@ -37,7 +37,7 @@ func (m *Manager) WithAuth(next http.Handler) http.Handler {
 		case errors.Is(err, entity.ErrUserIDNotFound):
 			w.WriteHeader(http.StatusUnauthorized)
 			return
-		case errors.Is(err, http.ErrNoCookie) || err != nil:
+		default:
 			userID, err = m.setNewUserCookie(w)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
