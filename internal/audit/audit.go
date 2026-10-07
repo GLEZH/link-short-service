@@ -16,7 +16,7 @@ type Action string
 
 const (
 	ActionShorten Action = "shorten"
-	ActionFollow Action = "follow"
+	ActionFollow  Action = "follow"
 )
 
 type Event struct {
