@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/GLEZH/linkshrtservice/internal/audit"
 	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/config"
 	"github.com/GLEZH/linkshrtservice/internal/database"
@@ -40,7 +41,15 @@ func main() {
 	storage, closeStorage := newStorage(cfg, db, sugar)
 	defer closeStorage()
 
-	handlers := handler.New(cfg.BaseURL, storage, sugar, db)
+	auditPublisher := audit.NewPublisher(sugar)
+	if cfg.AuditFile != "" {
+		auditPublisher.Subscribe(audit.NewFileObserver(cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		auditPublisher.Subscribe(audit.NewHTTPObserver(cfg.AuditURL, http.DefaultClient))
+	}
+
+	handlers := handler.New(cfg.BaseURL, storage, sugar, db, auditPublisher)
 	sugar.Infow(
 		"starting server",
 		"addr", cfg.ServerAddress,
