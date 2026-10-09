@@ -33,6 +33,7 @@ func (w *loggingResponseWriter) WriteHeader(statusCode int) {
 	w.responseData.status = statusCode
 }
 
+// WithLogging records request duration, status, and response size
 func WithLogging(next http.Handler, log *zap.SugaredLogger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

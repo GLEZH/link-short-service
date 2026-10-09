@@ -1,14 +1,17 @@
 package repository
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 )
 
+// URLStorage stores shortened URLs in memory
 type URLStorage struct {
 	mu            sync.RWMutex
 	nextID        int
@@ -16,6 +19,7 @@ type URLStorage struct {
 	originalIndex map[string]string
 }
 
+// NewURLStorage creates an empty in-memory storage
 func NewURLStorage() *URLStorage {
 	return &URLStorage{
 		urls:          make(map[string]entity.URL),
@@ -23,10 +27,12 @@ func NewURLStorage() *URLStorage {
 	}
 }
 
+// New creates a file-backed URL storage
 func New(filePath string) (*FileURLStorage, error) {
 	return NewFileURLStorage(filePath, NewURLStorage())
 }
 
+// Save stores one URL
 func (s *URLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -39,6 +45,7 @@ func (s *URLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, erro
 	return s.saveLocked(url), nil
 }
 
+// SaveBatch stores several URLs
 func (s *URLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -65,6 +72,7 @@ func (s *URLStorage) saveLocked(url entity.URL) entity.URL {
 	return url
 }
 
+// Get returns a URL by its short ID
 func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -80,42 +88,40 @@ func (s *URLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	return url, nil
 }
 
+// GetByUserID returns URLs owned by a user
 func (s *URLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.URL, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	type sortableURL struct {
-		url       entity.URL
-		numericID int
-		parsedID  bool
-	}
-
-	items := make([]sortableURL, 0)
+	count := 0
 	for _, url := range s.urls {
 		if url.UserID == userID {
-			id, err := strconv.Atoi(url.ID)
-			items = append(items, sortableURL{
-				url:       url,
-				numericID: id,
-				parsedID:  err == nil,
-			})
+			count++
 		}
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].parsedID || !items[j].parsedID {
-			return items[i].url.ID < items[j].url.ID
-		}
-		return items[i].numericID < items[j].numericID
-	})
 
-	urls := make([]entity.URL, 0, len(items))
-	for _, item := range items {
-		urls = append(urls, item.url)
+	urls := make([]entity.URL, 0, count)
+	for _, url := range s.urls {
+		if url.UserID == userID {
+			urls = append(urls, url)
+		}
 	}
+
+	slices.SortFunc(urls, compareURLIDs)
 
 	return urls, nil
 }
 
+func compareURLIDs(a, b entity.URL) int {
+	aID, aErr := strconv.Atoi(a.ID)
+	bID, bErr := strconv.Atoi(b.ID)
+	if aErr != nil || bErr != nil {
+		return strings.Compare(a.ID, b.ID)
+	}
+	return cmp.Compare(aID, bID)
+}
+
+// DeleteBatch marks a user's URLs as deleted
 func (s *URLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

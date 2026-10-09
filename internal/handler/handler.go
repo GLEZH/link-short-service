@@ -7,13 +7,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/GLEZH/linkshrtservice/internal/audit"
 	"github.com/GLEZH/linkshrtservice/internal/auth"
 	"github.com/GLEZH/linkshrtservice/internal/entity"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
+// URLStorage stores and retrieves shortened URLs
 type URLStorage interface {
 	Save(ctx context.Context, url entity.URL) (entity.URL, error)
 	SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error)
@@ -22,17 +26,34 @@ type URLStorage interface {
 	DeleteBatch(ctx context.Context, userID string, ids []string) error
 }
 
+// Database checks database availability
 type Database interface {
 	Ping(ctx context.Context) error
 }
 
-type Handler struct {
-	baseURL string
-	storage URLStorage
-	log     *zap.SugaredLogger
-	db      Database
-	deletes chan deleteRequest
+// Auditor receives successful request events
+type Auditor interface {
+	Notify(context.Context, audit.Event)
 }
+
+// Handler serves the URL shortener endpoints
+type Handler struct {
+	baseURL           string
+	storage           URLStorage
+	log               *zap.SugaredLogger
+	db                Database
+	deletes           chan deleteRequest
+	auditor           Auditor
+	deleteCtx         context.Context
+	cancelDelete      context.CancelFunc
+	deleteWorker      sync.WaitGroup
+	deleteEnqueuers   sync.WaitGroup
+	lifecycleMu       sync.Mutex
+	closing           bool
+	closeDeleteWorker sync.Once
+}
+
+var _ io.Closer = (*Handler)(nil)
 
 type shortenRequest struct {
 	URL string `json:"url"`
@@ -62,19 +83,47 @@ type deleteRequest struct {
 	urlID  string
 }
 
-func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database) *Handler {
+// New creates a URL shortener handler
+func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database, auditors ...Auditor) *Handler {
+	deleteCtx, cancelDelete := context.WithCancel(context.Background())
 	h := &Handler{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		storage: storage,
-		log:     log,
-		db:      db,
-		deletes: make(chan deleteRequest, deleteQueueSize),
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		storage:      storage,
+		log:          log,
+		db:           db,
+		deletes:      make(chan deleteRequest, deleteQueueSize),
+		deleteCtx:    deleteCtx,
+		cancelDelete: cancelDelete,
 	}
-	go h.runDeleteWorker(context.Background())
+	if len(auditors) > 0 {
+		h.auditor = auditors[0]
+	}
+
+	h.deleteWorker.Add(1)
+	go func() {
+		defer h.deleteWorker.Done()
+		h.runDeleteWorker(deleteCtx)
+	}()
 
 	return h
 }
 
+// Close waits for pending URL deletions
+func (h *Handler) Close() error {
+	h.closeDeleteWorker.Do(func() {
+		h.lifecycleMu.Lock()
+		h.closing = true
+		h.lifecycleMu.Unlock()
+
+		h.deleteEnqueuers.Wait()
+		h.cancelDelete()
+		h.deleteWorker.Wait()
+	})
+
+	return nil
+}
+
+// ShortenURL creates a short URL from a plain-text request
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -99,6 +148,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(shortURL))
 }
 
+// ShortenURLJSON creates a short URL from a JSON request
 func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 	var request shortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -123,6 +173,7 @@ func (h *Handler) ShortenURLJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(shortenResponse{Result: shortURL})
 }
 
+// ShortenURLBatch creates several short URLs
 func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 	var request []shortenBatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -170,6 +221,7 @@ func (h *Handler) ShortenURLBatch(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// GetUserURLs returns URLs created by the current user
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
@@ -200,6 +252,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// DeleteUserURLs schedules deletion of the current user's URLs
 func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
@@ -217,11 +270,15 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.enqueueDeleteURLs(userID, ids)
+	if !h.scheduleDeleteURLs(userID, ids) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
 
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// GetURL redirects a short URL to its original address
 func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -237,8 +294,10 @@ func (h *Handler) GetURL(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", shortURL.OriginalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+	h.notifyAudit(r.Context(), audit.ActionFollow, shortURL.OriginalURL)
 }
 
+// PingDB reports database availability
 func (h *Handler) PingDB(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -275,17 +334,54 @@ func (h *Handler) createShortURL(ctx context.Context, originalURL string) (strin
 		}
 		return "", err
 	}
+	h.notifyAudit(ctx, audit.ActionShorten, originalURL)
 
 	return h.baseURL + "/" + shortURL.ID, nil
 }
 
-func (h *Handler) enqueueDeleteURLs(userID string, ids []string) {
+func (h *Handler) notifyAudit(ctx context.Context, action audit.Action, originalURL string) {
+	if h.auditor == nil {
+		return
+	}
+
+	userID, _ := auth.UserIDFromContext(ctx)
+	h.auditor.Notify(ctx, audit.Event{
+		Timestamp: time.Now().Unix(),
+		Action:    action,
+		UserID:    userID,
+		URL:       originalURL,
+	})
+}
+
+func (h *Handler) scheduleDeleteURLs(userID string, ids []string) bool {
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+
+	if h.closing {
+		return false
+	}
+
+	h.deleteEnqueuers.Add(1)
+	go func() {
+		defer h.deleteEnqueuers.Done()
+		h.enqueueDeleteURLs(h.deleteCtx, userID, ids)
+	}()
+
+	return true
+}
+
+func (h *Handler) enqueueDeleteURLs(ctx context.Context, userID string, ids []string) {
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
 		}
-		h.deletes <- deleteRequest{userID: userID, urlID: id}
+
+		select {
+		case h.deletes <- deleteRequest{userID: userID, urlID: id}:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -293,9 +389,21 @@ func (h *Handler) runDeleteWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			h.drainDeleteQueue()
 			return
 		case req := <-h.deletes:
-			h.deleteBatch(ctx, h.fanInDeleteBatch(req))
+			h.deleteBatch(context.WithoutCancel(ctx), h.fanInDeleteBatch(req))
+		}
+	}
+}
+
+func (h *Handler) drainDeleteQueue() {
+	for {
+		select {
+		case req := <-h.deletes:
+			h.deleteBatch(context.Background(), h.fanInDeleteBatch(req))
+		default:
+			return
 		}
 	}
 }
