@@ -18,11 +18,13 @@ func BenchmarkHandler_ShortenURLJSON(b *testing.B) {
 		zap.NewNop().Sugar(),
 		nil,
 	)
+	b.Cleanup(func() {
+		_ = handlers.Close()
+	})
 	body := `{"url":"https://example.com/articles/benchmark"}`
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		request := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
 		request = request.WithContext(auth.WithUserID(request.Context(), "user-id"))
 		recorder := httptest.NewRecorder()

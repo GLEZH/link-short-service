@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/audit"
@@ -37,13 +38,22 @@ type Auditor interface {
 
 // Handler serves the URL shortener endpoints
 type Handler struct {
-	baseURL string
-	storage URLStorage
-	log     *zap.SugaredLogger
-	db      Database
-	deletes chan deleteRequest
-	auditor Auditor
+	baseURL           string
+	storage           URLStorage
+	log               *zap.SugaredLogger
+	db                Database
+	deletes           chan deleteRequest
+	auditor           Auditor
+	deleteCtx         context.Context
+	cancelDelete      context.CancelFunc
+	deleteWorker      sync.WaitGroup
+	deleteEnqueuers   sync.WaitGroup
+	lifecycleMu       sync.Mutex
+	closing           bool
+	closeDeleteWorker sync.Once
 }
+
+var _ io.Closer = (*Handler)(nil)
 
 type shortenRequest struct {
 	URL string `json:"url"`
@@ -75,19 +85,42 @@ type deleteRequest struct {
 
 // New creates a URL shortener handler
 func New(baseURL string, storage URLStorage, log *zap.SugaredLogger, db Database, auditors ...Auditor) *Handler {
+	deleteCtx, cancelDelete := context.WithCancel(context.Background())
 	h := &Handler{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		storage: storage,
-		log:     log,
-		db:      db,
-		deletes: make(chan deleteRequest, deleteQueueSize),
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		storage:      storage,
+		log:          log,
+		db:           db,
+		deletes:      make(chan deleteRequest, deleteQueueSize),
+		deleteCtx:    deleteCtx,
+		cancelDelete: cancelDelete,
 	}
 	if len(auditors) > 0 {
 		h.auditor = auditors[0]
 	}
-	go h.runDeleteWorker(context.Background())
+
+	h.deleteWorker.Add(1)
+	go func() {
+		defer h.deleteWorker.Done()
+		h.runDeleteWorker(deleteCtx)
+	}()
 
 	return h
+}
+
+// Close waits for pending URL deletions
+func (h *Handler) Close() error {
+	h.closeDeleteWorker.Do(func() {
+		h.lifecycleMu.Lock()
+		h.closing = true
+		h.lifecycleMu.Unlock()
+
+		h.deleteEnqueuers.Wait()
+		h.cancelDelete()
+		h.deleteWorker.Wait()
+	})
+
+	return nil
 }
 
 // ShortenURL creates a short URL from a plain-text request
@@ -237,7 +270,10 @@ func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.enqueueDeleteURLs(userID, ids)
+	if !h.scheduleDeleteURLs(userID, ids) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
 
 	w.WriteHeader(http.StatusAccepted)
 }
@@ -317,13 +353,35 @@ func (h *Handler) notifyAudit(ctx context.Context, action audit.Action, original
 	})
 }
 
-func (h *Handler) enqueueDeleteURLs(userID string, ids []string) {
+func (h *Handler) scheduleDeleteURLs(userID string, ids []string) bool {
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+
+	if h.closing {
+		return false
+	}
+
+	h.deleteEnqueuers.Add(1)
+	go func() {
+		defer h.deleteEnqueuers.Done()
+		h.enqueueDeleteURLs(h.deleteCtx, userID, ids)
+	}()
+
+	return true
+}
+
+func (h *Handler) enqueueDeleteURLs(ctx context.Context, userID string, ids []string) {
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
 		}
-		h.deletes <- deleteRequest{userID: userID, urlID: id}
+
+		select {
+		case h.deletes <- deleteRequest{userID: userID, urlID: id}:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -331,9 +389,21 @@ func (h *Handler) runDeleteWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			h.drainDeleteQueue()
 			return
 		case req := <-h.deletes:
-			h.deleteBatch(ctx, h.fanInDeleteBatch(req))
+			h.deleteBatch(context.WithoutCancel(ctx), h.fanInDeleteBatch(req))
+		}
+	}
+}
+
+func (h *Handler) drainDeleteQueue() {
+	for {
+		select {
+		case req := <-h.deletes:
+			h.deleteBatch(context.Background(), h.fanInDeleteBatch(req))
+		default:
+			return
 		}
 	}
 }

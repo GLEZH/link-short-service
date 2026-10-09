@@ -51,6 +51,9 @@ func (s brokenStorage) DeleteBatch(ctx context.Context, userID string, ids []str
 func TestShortenURL_InternalError(t *testing.T) {
 	core, logs := observer.New(zapcore.InfoLevel)
 	handlers := New("http://localhost:8080", brokenStorage{}, zap.New(core).Sugar(), nil)
+	t.Cleanup(func() {
+		_ = handlers.Close()
+	})
 
 	request := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://example.com"))
 	request = request.WithContext(auth.WithUserID(request.Context(), "user-id"))
@@ -98,6 +101,9 @@ func TestHandler_Audit(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			auditor := &recordingAuditor{}
 			handlers := New("http://localhost:8080", repository.NewURLStorage(), zap.NewNop().Sugar(), nil, auditor)
+			t.Cleanup(func() {
+				_ = handlers.Close()
+			})
 			router := chi.NewRouter()
 			router.Post("/", handlers.ShortenURL)
 			router.Post("/api/shorten", handlers.ShortenURLJSON)
@@ -127,6 +133,9 @@ func TestHandler_Audit(t *testing.T) {
 		}
 
 		handlers := New("http://localhost:8080", storage, zap.NewNop().Sugar(), nil, auditor)
+		t.Cleanup(func() {
+			_ = handlers.Close()
+		})
 		router := chi.NewRouter()
 		router.Get("/{id}", handlers.GetURL)
 		request := httptest.NewRequest(http.MethodGet, "/"+savedURL.ID, nil)
@@ -139,6 +148,35 @@ func TestHandler_Audit(t *testing.T) {
 		}
 		assertAuditEvent(t, auditor.events, audit.ActionFollow, "visitor-id", "https://example.com/follow")
 	})
+}
+
+func TestHandler_CloseDrainsDeleteQueue(t *testing.T) {
+	storage := repository.NewURLStorage()
+	savedURL, err := storage.Save(context.Background(), entity.URL{
+		OriginalURL: "https://example.com/delete",
+		UserID:      "user-id",
+	})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	handlers := New("http://localhost:8080", storage, zap.NewNop().Sugar(), nil)
+	request := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(`["`+savedURL.ID+`"]`))
+	request = request.WithContext(auth.WithUserID(request.Context(), "user-id"))
+	recorder := httptest.NewRecorder()
+	handlers.DeleteUserURLs(recorder, request)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status code = %d, want %d", recorder.Code, http.StatusAccepted)
+	}
+	if err = handlers.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	_, err = storage.Get(context.Background(), savedURL.ID)
+	if !errors.Is(err, entity.ErrURLDeleted) {
+		t.Fatalf("Get() error = %v, want %v", err, entity.ErrURLDeleted)
+	}
 }
 
 func assertAuditEvent(t *testing.T, events []audit.Event, action audit.Action, userID, originalURL string) {

@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/audit"
 	"github.com/GLEZH/linkshrtservice/internal/auth"
@@ -15,6 +21,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
+
+const shutdownTimeout = 10 * time.Second
 
 func main() {
 	cfg, err := config.New(os.Args[1:])
@@ -42,14 +50,30 @@ func main() {
 	defer closeStorage()
 
 	auditPublisher := audit.NewPublisher(sugar)
+	defer func() {
+		if err := auditPublisher.Close(); err != nil {
+			sugar.Errorw("close audit publisher", "error", err)
+		}
+	}()
+
 	if cfg.AuditFile != "" {
-		auditPublisher.Subscribe(audit.NewFileObserver(cfg.AuditFile))
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			sugar.Fatalw("init audit file", "error", err)
+		}
+		auditPublisher.Subscribe(fileObserver)
 	}
 	if cfg.AuditURL != "" {
-		auditPublisher.Subscribe(audit.NewHTTPObserver(cfg.AuditURL, http.DefaultClient))
+		auditPublisher.Subscribe(audit.NewHTTPObserver(cfg.AuditURL, nil))
 	}
 
 	handlers := handler.New(cfg.BaseURL, storage, sugar, db, auditPublisher)
+	defer func() {
+		if err := handlers.Close(); err != nil {
+			sugar.Errorw("close handlers", "error", err)
+		}
+	}()
+
 	sugar.Infow(
 		"starting server",
 		"addr", cfg.ServerAddress,
@@ -57,9 +81,43 @@ func main() {
 		"database_configured", cfg.DatabaseDSN != "",
 	)
 
-	err = http.ListenAndServe(cfg.ServerAddress, newRouter(handlers, sugar, auth.NewManager(cfg.AuthSecret)))
-	if err != nil {
-		sugar.Fatalw("start server", "error", err)
+	server := &http.Server{
+		Addr:    cfg.ServerAddress,
+		Handler: newRouter(handlers, sugar, auth.NewManager(cfg.AuthSecret)),
+	}
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err = runServer(shutdownCtx, server); err != nil {
+		sugar.Errorw("run server", "error", err)
+	}
+}
+
+func runServer(ctx context.Context, server *http.Server) error {
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErrors:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+
+		if err := server.Shutdown(ctx); err != nil {
+			return fmt.Errorf("shutdown server: %w", err)
+		}
+
+		err := <-serverErrors
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
 	}
 }
 

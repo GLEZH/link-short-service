@@ -35,6 +35,9 @@ func newTestRouter(t *testing.T) http.Handler {
 		t.Fatalf("repository.New() error = %v", err)
 	}
 	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), testDatabase{})
+	t.Cleanup(func() {
+		_ = handlers.Close()
+	})
 	return newRouter(handlers, zap.NewNop().Sugar(), auth.NewManager("test-secret"))
 }
 
@@ -46,6 +49,9 @@ func newTestRouterWithDatabase(t *testing.T, db handler.Database) http.Handler {
 		t.Fatalf("repository.New() error = %v", err)
 	}
 	handlers := handler.New("http://localhost:8080", storage, zap.NewNop().Sugar(), db)
+	t.Cleanup(func() {
+		_ = handlers.Close()
+	})
 	return newRouter(handlers, zap.NewNop().Sugar(), auth.NewManager("test-secret"))
 }
 

@@ -12,9 +12,8 @@ func BenchmarkURLStorage_SaveBatch(b *testing.B) {
 	ctx := context.Background()
 	urls := makeBenchmarkURLs(1000, "user-id")
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		storage := NewURLStorage()
 		if _, err := storage.SaveBatch(ctx, urls); err != nil {
 			b.Fatal(err)
@@ -30,9 +29,8 @@ func BenchmarkURLStorage_GetByUserID(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := storage.GetByUserID(ctx, "user-id"); err != nil {
 			b.Fatal(err)
 		}

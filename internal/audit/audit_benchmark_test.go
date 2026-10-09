@@ -17,9 +17,13 @@ func BenchmarkPublisher_Notify(b *testing.B) {
 		URL:       "https://example.com/articles/benchmark",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		publisher.Notify(context.Background(), event)
+	}
+
+	b.StopTimer()
+	if err := publisher.Close(); err != nil {
+		b.Fatal(err)
 	}
 }
