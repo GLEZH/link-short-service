@@ -16,19 +16,23 @@ type contextKey string
 
 const userIDKey contextKey = "user_id"
 
+// Claims contains the authenticated user ID
 type Claims struct {
 	jwt.RegisteredClaims
 	UserID string `json:"user_id"`
 }
 
+// Manager creates and validates authentication tokens
 type Manager struct {
 	secret []byte
 }
 
+// NewManager creates an authentication manager
 func NewManager(secret string) *Manager {
 	return &Manager{secret: []byte(secret)}
 }
 
+// WithAuth adds user identity to each request context
 func (m *Manager) WithAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, err := m.userIDFromRequest(r)
@@ -37,7 +41,7 @@ func (m *Manager) WithAuth(next http.Handler) http.Handler {
 		case errors.Is(err, entity.ErrUserIDNotFound):
 			w.WriteHeader(http.StatusUnauthorized)
 			return
-		case errors.Is(err, http.ErrNoCookie) || err != nil:
+		default:
 			userID, err = m.setNewUserCookie(w)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -86,6 +90,7 @@ func (m *Manager) setCookie(w http.ResponseWriter, userID string) error {
 	return nil
 }
 
+// BuildToken creates a signed token for a user
 func (m *Manager) BuildToken(userID string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -98,6 +103,7 @@ func (m *Manager) BuildToken(userID string) (string, error) {
 	return token.SignedString(m.secret)
 }
 
+// ParseUserID validates a token and returns its user ID
 func (m *Manager) ParseUserID(tokenString string) (string, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
@@ -119,10 +125,12 @@ func (m *Manager) ParseUserID(tokenString string) (string, error) {
 	return claims.UserID, nil
 }
 
+// WithUserID stores a user ID in a context
 func WithUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, userIDKey, userID)
 }
 
+// UserIDFromContext returns the user ID stored in a context
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	userID, ok := ctx.Value(userIDKey).(string)
 	return userID, ok && userID != ""

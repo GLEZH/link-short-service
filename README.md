@@ -42,3 +42,32 @@ git fetch template && git checkout template/v2 .github
 - **Clean Architecture**
 - **Hexagonal Architecture**
 - **Layered Architecture**
+
+## Бенчмарки и профилирование
+
+Профиль показал, что `URLStorage.GetByUserID` создавал два слайса: коллекцию
+вспомогательных структур для сортировки и результирующую коллекцию URL. После
+перехода на один слайс с рассчитанной ёмкостью и типобезопасную
+сортировку следующите показатели:
+
+```text
+До:     3786611 ns/op  3959066 B/op  23 allocs/op
+После:  2802910 ns/op   565252 B/op   1 allocs/op
+```
+
+Результат сравнения профилей:
+
+```text
+$ pprof -top -diff_base=profiles/base.pprof profiles/result.pprof
+File: repository.test
+Type: alloc_space
+Showing nodes accounting for -4.03GB, 84.25% of 4.78GB total
+      flat  flat%   sum%        cum   cum%
+   -4.03GB 84.25% 84.25%    -4.03GB 84.25%  github.com/GLEZH/linkshrtservice/internal/repository.(*URLStorage).GetByUserID
+         0     0% 84.25%    -4.03GB 84.17%  github.com/GLEZH/linkshrtservice/internal/repository.BenchmarkURLStorage_GetByUserID
+         0     0% 84.25%    -4.03GB 84.13%  testing.(*B).launch
+         0     0% 84.25%    -4.03GB 84.19%  testing.(*B).runN
+```
+
+Отрицательное значение показывает сокращение суммарных аллокаций на 84%.
+Текущее суммарное покрытие проекта тестами — 41,1%.

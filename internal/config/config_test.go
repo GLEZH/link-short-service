@@ -182,3 +182,39 @@ func restoreEnv(key, value string, ok bool) {
 	}
 	_ = os.Unsetenv(key)
 }
+
+func TestNewAuditConfig(t *testing.T) {
+	oldAuditFile, hadAuditFile := os.LookupEnv("AUDIT_FILE")
+	oldAuditURL, hadAuditURL := os.LookupEnv("AUDIT_URL")
+	t.Cleanup(func() {
+		restoreEnv("AUDIT_FILE", oldAuditFile, hadAuditFile)
+		restoreEnv("AUDIT_URL", oldAuditURL, hadAuditURL)
+	})
+
+	_ = os.Unsetenv("AUDIT_FILE")
+	_ = os.Unsetenv("AUDIT_URL")
+
+	cfg, err := New([]string{"--audit-file", "/tmp/flag-audit.log", "--audit-url", "http://flag.example.com"})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if cfg.AuditFile != "/tmp/flag-audit.log" {
+		t.Errorf("AuditFile = %q, want %q", cfg.AuditFile, "/tmp/flag-audit.log")
+	}
+	if cfg.AuditURL != "http://flag.example.com" {
+		t.Errorf("AuditURL = %q, want %q", cfg.AuditURL, "http://flag.example.com")
+	}
+
+	t.Setenv("AUDIT_FILE", "/tmp/env-audit.log")
+	t.Setenv("AUDIT_URL", "http://env.example.com")
+	cfg, err = New([]string{"--audit-file", "/tmp/flag-audit.log", "--audit-url", "http://flag.example.com"})
+	if err != nil {
+		t.Fatalf("New() with environment error = %v", err)
+	}
+	if cfg.AuditFile != "/tmp/env-audit.log" {
+		t.Errorf("AuditFile = %q, want %q", cfg.AuditFile, "/tmp/env-audit.log")
+	}
+	if cfg.AuditURL != "http://env.example.com" {
+		t.Errorf("AuditURL = %q, want %q", cfg.AuditURL, "http://env.example.com")
+	}
+}

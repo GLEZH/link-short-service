@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -217,6 +219,32 @@ func TestURLStorage_GetByUserID(t *testing.T) {
 	}
 	if urls[0].OriginalURL != "http://first.example.com" {
 		t.Errorf("OriginalURL = %q, want %q", urls[0].OriginalURL, "http://first.example.com")
+	}
+}
+
+func TestURLStorage_GetByUserIDSortsNumericIDs(t *testing.T) {
+	ctx := context.Background()
+	storage := NewURLStorage()
+	urls := make([]entity.URL, 12)
+	for i := range urls {
+		urls[i] = entity.URL{
+			OriginalURL: fmt.Sprintf("http://example.com/%d", i),
+			UserID:      "user-id",
+		}
+	}
+	if _, err := storage.SaveBatch(ctx, urls); err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+
+	got, err := storage.GetByUserID(ctx, "user-id")
+	if err != nil {
+		t.Fatalf("GetByUserID() error = %v", err)
+	}
+	for i, url := range got {
+		wantID := strconv.Itoa(i + 1)
+		if url.ID != wantID {
+			t.Errorf("urls[%d].ID = %q, want %q", i, url.ID, wantID)
+		}
 	}
 }
 

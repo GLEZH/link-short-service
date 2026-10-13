@@ -13,14 +13,17 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// DatabaseURLStorage stores shortened URLs in PostgreSQL
 type DatabaseURLStorage struct {
 	db *sql.DB
 }
 
+// NewDatabaseURLStorage creates a PostgreSQL URL storage
 func NewDatabaseURLStorage(db *sql.DB) *DatabaseURLStorage {
 	return &DatabaseURLStorage{db: db}
 }
 
+// Save stores one URL
 func (s *DatabaseURLStorage) Save(ctx context.Context, url entity.URL) (entity.URL, error) {
 	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
 	defer cancel()
@@ -47,6 +50,7 @@ func (s *DatabaseURLStorage) Save(ctx context.Context, url entity.URL) (entity.U
 	return url, nil
 }
 
+// SaveBatch stores several URLs in one transaction
 func (s *DatabaseURLStorage) SaveBatch(ctx context.Context, urls []entity.URL) ([]entity.URL, error) {
 	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
 	defer cancel()
@@ -112,6 +116,7 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
 }
 
+// Get returns a URL by its short ID
 func (s *DatabaseURLStorage) Get(ctx context.Context, id string) (entity.URL, error) {
 	urlID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
@@ -140,6 +145,7 @@ func (s *DatabaseURLStorage) Get(ctx context.Context, id string) (entity.URL, er
 	return url, nil
 }
 
+// GetByUserID returns URLs owned by a user
 func (s *DatabaseURLStorage) GetByUserID(ctx context.Context, userID string) ([]entity.URL, error) {
 	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
 	defer cancel()
@@ -171,6 +177,7 @@ func (s *DatabaseURLStorage) GetByUserID(ctx context.Context, userID string) ([]
 	return urls, nil
 }
 
+// DeleteBatch marks a user's URLs as deleted
 func (s *DatabaseURLStorage) DeleteBatch(ctx context.Context, userID string, ids []string) error {
 	ctx, cancel := context.WithTimeout(ctx, storageOperationTimeout)
 	defer cancel()
