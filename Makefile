@@ -25,5 +25,8 @@ test:
 	go run gotest.tools/gotestsum@v1.13.0 --format pkgname -- -coverpkg=./... -coverprofile=$(COVERAGE_FILE) -covermode=atomic -count=1 ./...
 	go tool cover -func=$(COVERAGE_FILE) | tail -n 1
 
+staticlint:
+	go run ./cmd/staticlint ./...
+
 run:
 	DATABASE_DSN="$(DATABASE_DSN)" go run ./cmd/shortener

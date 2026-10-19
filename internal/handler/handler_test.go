@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -176,6 +177,60 @@ func TestHandler_CloseDrainsDeleteQueue(t *testing.T) {
 	_, err = storage.Get(context.Background(), savedURL.ID)
 	if !errors.Is(err, entity.ErrURLDeleted) {
 		t.Fatalf("Get() error = %v, want %v", err, entity.ErrURLDeleted)
+	}
+}
+
+func TestHandler_ShortenBatchAndGetUserURLs(t *testing.T) {
+	handlers := New("http://localhost:8080", repository.NewURLStorage(), zap.NewNop().Sugar(), nil)
+	t.Cleanup(func() {
+		_ = handlers.Close()
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten/batch",
+		strings.NewReader(`[
+			{"correlation_id":"first","original_url":"https://first.example.com"},
+			{"correlation_id":"second","original_url":"https://second.example.com"}
+		]`),
+	)
+	request = request.WithContext(auth.WithUserID(request.Context(), "user-id"))
+	recorder := httptest.NewRecorder()
+	handlers.ShortenURLBatch(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("batch status code = %d, want %d", recorder.Code, http.StatusCreated)
+	}
+
+	var batchResponse []shortenBatchResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&batchResponse); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if len(batchResponse) != 2 {
+		t.Fatalf("batch response length = %d, want 2", len(batchResponse))
+	}
+	if batchResponse[0].CorrelationID != "first" || batchResponse[1].CorrelationID != "second" {
+		t.Errorf("batch correlation IDs = %q, %q, want first, second", batchResponse[0].CorrelationID, batchResponse[1].CorrelationID)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	request = request.WithContext(auth.WithUserID(request.Context(), "user-id"))
+	recorder = httptest.NewRecorder()
+	handlers.GetUserURLs(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list status code = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var listResponse []userURLResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&listResponse); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listResponse) != 2 {
+		t.Fatalf("list response length = %d, want 2", len(listResponse))
+	}
+	if listResponse[0].OriginalURL != "https://first.example.com" || listResponse[1].OriginalURL != "https://second.example.com" {
+		t.Errorf("list response = %+v, want saved URLs", listResponse)
 	}
 }
 
