@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -24,7 +25,15 @@ import (
 
 const shutdownTimeout = 10 * time.Second
 
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	printBuildInfo(os.Stdout)
+
 	cfg, err := config.New(os.Args[1:])
 	if err != nil {
 		log.Fatal(err)
@@ -91,6 +100,20 @@ func main() {
 	if err = runServer(shutdownCtx, server); err != nil {
 		sugar.Errorw("run server", "error", err)
 	}
+}
+
+func printBuildInfo(w io.Writer) {
+	fmt.Fprintf(w, "Build version: %s\n", buildValue(buildVersion))
+	fmt.Fprintf(w, "Build date: %s\n", buildValue(buildDate))
+	fmt.Fprintf(w, "Build commit: %s\n", buildValue(buildCommit))
+}
+
+func buildValue(value string) string {
+	if value == "" {
+		return "N/A"
+	}
+
+	return value
 }
 
 func runServer(ctx context.Context, server *http.Server) error {

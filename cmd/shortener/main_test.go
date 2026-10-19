@@ -55,6 +55,52 @@ func newTestRouterWithDatabase(t *testing.T, db handler.Database) http.Handler {
 	return newRouter(handlers, zap.NewNop().Sugar(), auth.NewManager("test-secret"))
 }
 
+func TestPrintBuildInfo(t *testing.T) {
+	originalVersion := buildVersion
+	originalDate := buildDate
+	originalCommit := buildCommit
+	t.Cleanup(func() {
+		buildVersion = originalVersion
+		buildDate = originalDate
+		buildCommit = originalCommit
+	})
+
+	tests := []struct {
+		name    string
+		version string
+		date    string
+		commit  string
+		want    string
+	}{
+		{
+			name: "missing values",
+			want: "Build version: N/A\nBuild date: N/A\nBuild commit: N/A\n",
+		},
+		{
+			name:    "build values",
+			version: "v1.2.3",
+			date:    "2026-10-20",
+			commit:  "abc123",
+			want:    "Build version: v1.2.3\nBuild date: 2026-10-20\nBuild commit: abc123\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buildVersion = tt.version
+			buildDate = tt.date
+			buildCommit = tt.commit
+
+			var output bytes.Buffer
+			printBuildInfo(&output)
+
+			if output.String() != tt.want {
+				t.Errorf("output = %q, want %q", output.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestRouter(t *testing.T) {
 	t.Run("shorten and expand", func(t *testing.T) {
 		router := newTestRouter(t)
