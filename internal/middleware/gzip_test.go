@@ -71,6 +71,9 @@ func TestWithGzip_CompressesResponse(t *testing.T) {
 	if recorder.Header().Get("Content-Encoding") != "gzip" {
 		t.Errorf("Content-Encoding = %q, want gzip", recorder.Header().Get("Content-Encoding"))
 	}
+	if recorder.Header().Get("Vary") != "Accept-Encoding" {
+		t.Errorf("Vary = %q, want Accept-Encoding", recorder.Header().Get("Vary"))
+	}
 	if recorder.Header().Get("Content-Length") != "" {
 		t.Errorf("Content-Length = %q, want empty", recorder.Header().Get("Content-Length"))
 	}

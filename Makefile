@@ -1,6 +1,10 @@
 include .env
 
 COVERAGE_FILE = coverage.out
+BUILD_VERSION ?= $(shell git describe --tags --always --dirty)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_COMMIT ?= $(shell git rev-parse --short HEAD)
+BUILD_LDFLAGS = -X main.buildVersion=$(BUILD_VERSION) -X main.buildDate=$(BUILD_DATE) -X main.buildCommit=$(BUILD_COMMIT)
 
 export PROJECT_NAME
 export DATABASE_DSN
@@ -11,6 +15,10 @@ develop:
 build-dev:
 	mkdir -p bin
 	go build -o ./bin/shortener ./cmd/shortener
+
+build:
+	mkdir -p bin
+	go build -ldflags "$(BUILD_LDFLAGS)" -o ./bin/shortener ./cmd/shortener
 
 local:
 	docker compose --env-file .env.dev up --force-recreate --build
