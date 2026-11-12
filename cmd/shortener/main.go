@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/audit"
 	"github.com/GLEZH/linkshrtservice/internal/auth"
@@ -22,8 +21,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
-
-const shutdownTimeout = 10 * time.Second
 
 var (
 	buildVersion string
@@ -88,13 +85,21 @@ func main() {
 		"addr", cfg.ServerAddress,
 		"file_storage_path", cfg.FileStoragePath,
 		"database_configured", cfg.DatabaseDSN != "",
+		"enable_https", cfg.EnableHTTPS,
 	)
 
 	server := &http.Server{
 		Addr:    cfg.ServerAddress,
 		Handler: newRouter(handlers, sugar, auth.NewManager(cfg.AuthSecret)),
 	}
-	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	if cfg.EnableHTTPS {
+		server.TLSConfig, err = newTLSConfig(cfg.ServerAddress)
+		if err != nil {
+			sugar.Errorw("init TLS", "error", err)
+			return
+		}
+	}
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
 	if err = runServer(shutdownCtx, server); err != nil {
@@ -119,6 +124,10 @@ func buildValue(value string) string {
 func runServer(ctx context.Context, server *http.Server) error {
 	serverErrors := make(chan error, 1)
 	go func() {
+		if server.TLSConfig != nil {
+			serverErrors <- server.ListenAndServeTLS("", "")
+			return
+		}
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -129,10 +138,8 @@ func runServer(ctx context.Context, server *http.Server) error {
 		}
 		return err
 	case <-ctx.Done():
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		if err := server.Shutdown(ctx); err != nil {
+		// The signal stops accepting connections without cancelling active requests
+		if err := server.Shutdown(context.Background()); err != nil {
 			return fmt.Errorf("shutdown server: %w", err)
 		}
 
@@ -158,7 +165,9 @@ func newStorage(cfg *config.Config, db *database.DB, sugar *zap.SugaredLogger) (
 			sugar.Fatalw("init file storage", "error", err)
 		}
 		return storage, func() {
-			_ = storage.Close()
+			if err := storage.Close(); err != nil {
+				sugar.Errorw("close file storage", "error", err)
+			}
 		}
 	}
 

@@ -71,3 +71,14 @@ Showing nodes accounting for -4.03GB, 84.25% of 4.78GB total
 
 Отрицательное значение показывает сокращение суммарных аллокаций на 84%.
 Текущее суммарное покрытие проекта тестами — 41,1%.
+
+## HTTPS
+
+HTTPS включается флагом `-s` или переменной окружения `ENABLE_HTTPS=true`:
+
+```bash
+go run ./cmd/shortener -s -b https://localhost:8080
+ENABLE_HTTPS=true go run ./cmd/shortener -b https://localhost:8080
+```
+
+По умолчанию сервер работает по HTTP.
