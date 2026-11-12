@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -660,4 +661,95 @@ func gzipBody(t *testing.T, body string) *bytes.Buffer {
 	}
 
 	return &buf
+}
+
+func TestRunServerWaitsForActiveRequest(t *testing.T) {
+	addresses := make(chan string, 1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	shuttingDown := make(chan struct{})
+	server := &http.Server{
+		Addr: "127.0.0.1:0",
+		BaseContext: func(listener net.Listener) context.Context {
+			addresses <- listener.Addr().String()
+			return context.Background()
+		},
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			<-release
+			if err := r.Context().Err(); err != nil {
+				t.Errorf("active request cancelled: %v", err)
+			}
+			_, _ = io.WriteString(w, "completed")
+		}),
+	}
+	server.RegisterOnShutdown(func() { close(shuttingDown) })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer server.Close()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- runServer(ctx, server) }()
+	var address string
+	select {
+	case address = <-addresses:
+	case err := <-serverErrors:
+		t.Fatalf("startup: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup timed out")
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	requestErrors := make(chan error, 1)
+	go func() {
+		response, err := client.Get("http://" + address)
+		if err != nil {
+			requestErrors <- err
+			return
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err == nil && string(body) != "completed" {
+			err = errors.New("incomplete response")
+		}
+		requestErrors <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request timed out")
+	}
+	cancel()
+	select {
+	case <-shuttingDown:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not start")
+	}
+	select {
+	case err := <-serverErrors:
+		t.Fatalf("server exited with active request: %v", err)
+	default:
+	}
+	close(release)
+	select {
+	case err := <-requestErrors:
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("response timed out")
+	}
+	select {
+	case err := <-serverErrors:
+		if err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown timed out")
+	}
 }

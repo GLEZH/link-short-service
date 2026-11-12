@@ -282,3 +282,37 @@ func TestURLStorage_BatchPersistence(t *testing.T) {
 		t.Errorf("OriginalURL = %q, want %q", gotURL.OriginalURL, "http://practicum.yandex.ru")
 	}
 }
+
+func TestFileURLStorageClosePersistsPendingRecords(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "storage")
+	path := filepath.Join(dir, "urls.json")
+	storage, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The initial write fails, leaving a record that must be saved on Close
+	if _, err := storage.Save(ctx, entity.URL{OriginalURL: "https://example.com/pending", UserID: "owner"}); err == nil {
+		t.Fatal("Save() error = nil, want missing directory error")
+	}
+	if err := storage.Close(); err == nil {
+		t.Fatal("Close() error = nil, want write error")
+	}
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Close(); err != nil {
+		t.Fatalf("Close(): %v", err)
+	}
+	restored, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	urls, err := restored.GetByUserID(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(urls) != 1 || urls[0].OriginalURL != "https://example.com/pending" {
+		t.Fatalf("restored URLs = %+v, want pending record", urls)
+	}
+}

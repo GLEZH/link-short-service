@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/audit"
 	"github.com/GLEZH/linkshrtservice/internal/auth"
@@ -22,8 +21,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
-
-const shutdownTimeout = 10 * time.Second
 
 var (
 	buildVersion string
@@ -102,7 +99,7 @@ func main() {
 			return
 		}
 	}
-	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
 	if err = runServer(shutdownCtx, server); err != nil {
@@ -141,10 +138,8 @@ func runServer(ctx context.Context, server *http.Server) error {
 		}
 		return err
 	case <-ctx.Done():
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-
-		if err := server.Shutdown(ctx); err != nil {
+		// The signal stops accepting connections without cancelling active requests
+		if err := server.Shutdown(context.Background()); err != nil {
 			return fmt.Errorf("shutdown server: %w", err)
 		}
 
@@ -170,7 +165,9 @@ func newStorage(cfg *config.Config, db *database.DB, sugar *zap.SugaredLogger) (
 			sugar.Fatalw("init file storage", "error", err)
 		}
 		return storage, func() {
-			_ = storage.Close()
+			if err := storage.Close(); err != nil {
+				sugar.Errorw("close file storage", "error", err)
+			}
 		}
 	}
 
