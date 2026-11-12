@@ -88,11 +88,19 @@ func main() {
 		"addr", cfg.ServerAddress,
 		"file_storage_path", cfg.FileStoragePath,
 		"database_configured", cfg.DatabaseDSN != "",
+		"enable_https", cfg.EnableHTTPS,
 	)
 
 	server := &http.Server{
 		Addr:    cfg.ServerAddress,
 		Handler: newRouter(handlers, sugar, auth.NewManager(cfg.AuthSecret)),
+	}
+	if cfg.EnableHTTPS {
+		server.TLSConfig, err = newTLSConfig(cfg.ServerAddress)
+		if err != nil {
+			sugar.Errorw("init TLS", "error", err)
+			return
+		}
 	}
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -119,6 +127,10 @@ func buildValue(value string) string {
 func runServer(ctx context.Context, server *http.Server) error {
 	serverErrors := make(chan error, 1)
 	go func() {
+		if server.TLSConfig != nil {
+			serverErrors <- server.ListenAndServeTLS("", "")
+			return
+		}
 		serverErrors <- server.ListenAndServe()
 	}()
 

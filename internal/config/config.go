@@ -15,6 +15,7 @@ type Config struct {
 	AuthSecret      string `env:"AUTH_SECRET"`
 	AuditFile       string `env:"AUDIT_FILE"`
 	AuditURL        string `env:"AUDIT_URL"`
+	EnableHTTPS     bool   `env:"ENABLE_HTTPS"`
 }
 
 // New parses settings from command-line arguments and the environment
@@ -29,6 +30,7 @@ func New(args []string) (*Config, error) {
 	flags.StringVar(&cfg.AuthSecret, "auth-secret", "shortener-auth-secret", "auth secret")
 	flags.StringVar(&cfg.AuditFile, "audit-file", "", "path to audit log file")
 	flags.StringVar(&cfg.AuditURL, "audit-url", "", "audit server URL")
+	flags.BoolVar(&cfg.EnableHTTPS, "s", false, "enable HTTPS")
 
 	if err := flags.Parse(args); err != nil {
 		return nil, err
