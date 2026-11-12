@@ -218,3 +218,38 @@ func TestNewAuditConfig(t *testing.T) {
 		t.Errorf("AuditURL = %q, want %q", cfg.AuditURL, "http://env.example.com")
 	}
 }
+
+func TestNewHTTPSConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		env     string
+		want    bool
+		wantErr bool
+	}{
+		{name: "disabled by default"},
+		{name: "enabled by flag", args: []string{"-s"}, want: true},
+		{name: "enabled by environment", env: "true", want: true},
+		{name: "environment overrides flag", args: []string{"-s"}, env: "false"},
+		{name: "environment enables explicit false flag", args: []string{"-s=false"}, env: "true", want: true},
+		{name: "invalid environment", env: "invalid", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("ENABLE_HTTPS", tt.env)
+			cfg, err := New(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("New() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if cfg.EnableHTTPS != tt.want {
+				t.Errorf("EnableHTTPS = %v, want %v", cfg.EnableHTTPS, tt.want)
+			}
+		})
+	}
+}
