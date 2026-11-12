@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -252,4 +254,79 @@ func TestNewHTTPSConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewFileConfig(t *testing.T) {
+	for _, key := range []string{"CONFIG", "SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN", "AUTH_SECRET", "AUDIT_FILE", "AUDIT_URL", "ENABLE_HTTPS"} {
+		t.Setenv(key, "")
+	}
+	defaults := Config{ServerAddress: ":8080", BaseURL: "http://localhost:8080", AuthSecret: "shortener-auth-secret"}
+	fileValues := Config{
+		ServerAddress: "localhost:8443", BaseURL: "https://localhost:8443",
+		FileStoragePath: "/tmp/urls.json", DatabaseDSN: "postgres://file",
+		AuthSecret: "file-secret", AuditFile: "/tmp/audit.log",
+		AuditURL: "https://audit.example.com", EnableHTTPS: true,
+	}
+	const fullJSON = `{"server_address":"localhost:8443","base_url":"https://localhost:8443","file_storage_path":"/tmp/urls.json","database_dsn":"postgres://file","auth_secret":"file-secret","audit_file":"/tmp/audit.log","audit_url":"https://audit.example.com","enable_https":true}`
+	tests := []struct {
+		name    string
+		data    string
+		flag    string
+		args    []string
+		env     map[string]string
+		want    Config
+		wantErr bool
+	}{
+		{name: "short flag", data: fullJSON, flag: "-c", want: fileValues},
+		{name: "long flag", data: fullJSON, flag: "-config", want: fileValues},
+		{name: "CONFIG selects file", data: fullJSON, want: fileValues},
+		{name: "CONFIG overrides flag path", data: fullJSON, args: []string{"-c", "missing.json"}, want: fileValues},
+		{name: "missing fields preserve defaults", data: `{}`, flag: "-c", want: defaults},
+		{name: "partial file", data: `{"enable_https":true}`, flag: "-c", want: Config{ServerAddress: ":8080", BaseURL: "http://localhost:8080", AuthSecret: "shortener-auth-secret", EnableHTTPS: true}},
+		{name: "explicit empty values", data: `{"server_address":"","base_url":"","auth_secret":""}`, flag: "-c", want: Config{}},
+		{name: "flags override all file settings", data: fullJSON, flag: "-config",
+			args: []string{"-a", ":8080", "-b", "http://localhost:8080", "-f=", "-d=", "-auth-secret", "shortener-auth-secret", "-audit-file=", "-audit-url=", "-s=false"}, want: defaults},
+		{name: "environment overrides flags and file", data: fullJSON, flag: "-c",
+			args: []string{"-a", ":9999", "-s"},
+			env:  map[string]string{"SERVER_ADDRESS": ":9000", "BASE_URL": "http://env", "FILE_STORAGE_PATH": "env.json", "DATABASE_DSN": "postgres://env", "AUTH_SECRET": "env-secret", "AUDIT_FILE": "env.log", "AUDIT_URL": "http://audit.env", "ENABLE_HTTPS": "false"},
+			want: Config{ServerAddress: ":9000", BaseURL: "http://env", FileStoragePath: "env.json", DatabaseDSN: "postgres://env", AuthSecret: "env-secret", AuditFile: "env.log", AuditURL: "http://audit.env"}},
+		{name: "invalid JSON", data: `{`, flag: "-c", wantErr: true},
+		{name: "incorrect field type", data: `{"enable_https":"true"}`, flag: "-c", wantErr: true},
+		{name: "trailing JSON", data: `{} {}`, flag: "-c", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tt.data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{}, tt.args...)
+			if tt.flag != "" {
+				args = append(args, tt.flag, path)
+			} else {
+				t.Setenv("CONFIG", path)
+			}
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			cfg, err := New(args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("New() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if !reflect.DeepEqual(*cfg, tt.want) {
+				t.Errorf("config = %+v, want %+v", *cfg, tt.want)
+			}
+		})
+	}
+	t.Run("missing file", func(t *testing.T) {
+		if _, err := New([]string{"-c", filepath.Join(t.TempDir(), "missing.json")}); err == nil {
+			t.Fatal("New() error = nil, want error")
+		}
+	})
 }
