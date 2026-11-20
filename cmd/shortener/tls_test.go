@@ -42,7 +42,7 @@ func TestRunServerHTTPS(t *testing.T) {
 	defer cancel()
 	t.Cleanup(func() { _ = server.Close() })
 	serverErrors := make(chan error, 1)
-	go func() { serverErrors <- runServer(ctx, server) }()
+	go func() { serverErrors <- runServer(ctx, server, 5*time.Second) }()
 
 	var address string
 	select {

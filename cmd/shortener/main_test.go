@@ -695,7 +695,7 @@ func TestRunServerWaitsForActiveRequest(t *testing.T) {
 		}
 	}()
 	serverErrors := make(chan error, 1)
-	go func() { serverErrors <- runServer(ctx, server) }()
+	go func() { serverErrors <- runServer(ctx, server, 5*time.Second) }()
 	var address string
 	select {
 	case address = <-addresses:
@@ -751,5 +751,67 @@ func TestRunServerWaitsForActiveRequest(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("shutdown timed out")
+	}
+}
+
+func TestRunServerStopsHungRequestAfterTimeout(t *testing.T) {
+	addresses := make(chan string, 1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := &http.Server{
+		Addr: "127.0.0.1:0",
+		BaseContext: func(listener net.Listener) context.Context {
+			addresses <- listener.Addr().String()
+			return context.Background()
+		},
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			<-release
+		}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer server.Close()
+	defer close(release)
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- runServer(ctx, server, 50*time.Millisecond) }()
+	var address string
+	select {
+	case address = <-addresses:
+	case err := <-serverErrors:
+		t.Fatalf("startup: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup timed out")
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	requestErrors := make(chan error, 1)
+	go func() {
+		response, err := client.Get("http://" + address)
+		if err == nil {
+			response.Body.Close()
+		}
+		requestErrors <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request timed out")
+	}
+	cancel()
+	select {
+	case err := <-serverErrors:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("shutdown error = %v, want %v", err, context.DeadlineExceeded)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown blocked by hung request")
+	}
+	select {
+	case err := <-requestErrors:
+		if err == nil {
+			t.Fatal("hung request completed, want closed connection")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("hung connection was not closed")
 	}
 }

@@ -45,28 +45,28 @@ func New(args []string) (*Config, error) {
 		configPath = path
 	}
 	if configPath != "" {
-		// Save explicit flags before decoding into the settings they reference
-		explicitFlags := make(map[string]string)
-		flags.Visit(func(f *flag.Flag) {
-			explicitFlags[f.Name] = f.Value.String()
-		})
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("read config file: %w", err)
+		if err := loadFile(configPath, cfg); err != nil {
+			return nil, err
 		}
-		if err := json.Unmarshal(data, cfg); err != nil {
-			return nil, fmt.Errorf("parse config file: %w", err)
-		}
-		for name, value := range explicitFlags {
-			if err := flags.Set(name, value); err != nil {
-				return nil, fmt.Errorf("restore flag %s: %w", name, err)
-			}
+		if err := flags.Parse(args); err != nil {
+			return nil, err
 		}
 	}
-
 	if err := env.Parse(cfg); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+func loadFile(path string, cfg *Config) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read config file: %w", err)
+	}
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return fmt.Errorf("parse config file: %w", err)
+	}
+
+	return nil
 }

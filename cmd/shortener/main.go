@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/GLEZH/linkshrtservice/internal/audit"
 	"github.com/GLEZH/linkshrtservice/internal/auth"
@@ -21,6 +22,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
+
+// shutdownTimeout limits how long the server waits for active requests
+const shutdownTimeout = 10 * time.Second
 
 var (
 	buildVersion string
@@ -102,7 +106,7 @@ func main() {
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
-	if err = runServer(shutdownCtx, server); err != nil {
+	if err = runServer(shutdownCtx, server, shutdownTimeout); err != nil {
 		sugar.Errorw("run server", "error", err)
 	}
 }
@@ -121,7 +125,7 @@ func buildValue(value string) string {
 	return value
 }
 
-func runServer(ctx context.Context, server *http.Server) error {
+func runServer(ctx context.Context, server *http.Server, timeout time.Duration) error {
 	serverErrors := make(chan error, 1)
 	go func() {
 		if server.TLSConfig != nil {
@@ -139,7 +143,13 @@ func runServer(ctx context.Context, server *http.Server) error {
 		return err
 	case <-ctx.Done():
 		// The signal stops accepting connections without cancelling active requests
-		if err := server.Shutdown(context.Background()); err != nil {
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		if err := server.Shutdown(timeoutCtx); err != nil {
+			// Hung connections are dropped so the caller can still save data
+			if closeErr := server.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
 			return fmt.Errorf("shutdown server: %w", err)
 		}
 
