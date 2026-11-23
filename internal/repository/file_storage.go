@@ -145,9 +145,15 @@ func (s *FileURLStorage) DeleteBatch(ctx context.Context, userID string, ids []s
 	return nil
 }
 
-// Close releases storage resources
+// Close persists any pending records before releasing storage resources
 func (s *FileURLStorage) Close() error {
-	return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.filePath == "" {
+		return nil
+	}
+	return writeRecords(s.filePath, s.records)
 }
 
 func readRecords(filename string) ([]record, error) {

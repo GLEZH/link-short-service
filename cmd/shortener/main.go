@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// shutdownTimeout limits how long the server waits for active requests
 const shutdownTimeout = 10 * time.Second
 
 var (
@@ -88,16 +89,24 @@ func main() {
 		"addr", cfg.ServerAddress,
 		"file_storage_path", cfg.FileStoragePath,
 		"database_configured", cfg.DatabaseDSN != "",
+		"enable_https", cfg.EnableHTTPS,
 	)
 
 	server := &http.Server{
 		Addr:    cfg.ServerAddress,
 		Handler: newRouter(handlers, sugar, auth.NewManager(cfg.AuthSecret)),
 	}
-	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	if cfg.EnableHTTPS {
+		server.TLSConfig, err = newTLSConfig(cfg.ServerAddress)
+		if err != nil {
+			sugar.Errorw("init TLS", "error", err)
+			return
+		}
+	}
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 	defer stop()
 
-	if err = runServer(shutdownCtx, server); err != nil {
+	if err = runServer(shutdownCtx, server, shutdownTimeout); err != nil {
 		sugar.Errorw("run server", "error", err)
 	}
 }
@@ -116,9 +125,13 @@ func buildValue(value string) string {
 	return value
 }
 
-func runServer(ctx context.Context, server *http.Server) error {
+func runServer(ctx context.Context, server *http.Server, timeout time.Duration) error {
 	serverErrors := make(chan error, 1)
 	go func() {
+		if server.TLSConfig != nil {
+			serverErrors <- server.ListenAndServeTLS("", "")
+			return
+		}
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -129,10 +142,14 @@ func runServer(ctx context.Context, server *http.Server) error {
 		}
 		return err
 	case <-ctx.Done():
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		// The signal stops accepting connections without cancelling active requests
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-
-		if err := server.Shutdown(ctx); err != nil {
+		if err := server.Shutdown(timeoutCtx); err != nil {
+			// Hung connections are dropped so the caller can still save data
+			if closeErr := server.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
 			return fmt.Errorf("shutdown server: %w", err)
 		}
 
@@ -158,7 +175,9 @@ func newStorage(cfg *config.Config, db *database.DB, sugar *zap.SugaredLogger) (
 			sugar.Fatalw("init file storage", "error", err)
 		}
 		return storage, func() {
-			_ = storage.Close()
+			if err := storage.Close(); err != nil {
+				sugar.Errorw("close file storage", "error", err)
+			}
 		}
 	}
 
